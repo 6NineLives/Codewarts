@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ASL Translator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --border: #222222;
+      --accent: #00ff88;
+      --accent2: #ff3366;
+      --text: #f0f0f0;
+      --muted: #555555;
+      --font-mono: 'Space Mono', monospace;
+      --font-display: 'Syne', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+      overflow-x: hidden;
+    }
+
+    /* Noise texture overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.4;
+    }
+
+    header {
+      width: 100%;
+      max-width: 900px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo {
+      font-family: var(--font-display);
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -2px;
+      line-height: 1;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .badge {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+    }
+
+    .main {
+      width: 100%;
+      max-width: 900px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    @media (max-width: 700px) {
+      .main { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 24px;
+    }
+
+    .panel-label {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    #video-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    /* Guide box overlay */
+    #guide-box {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 55%;
+      aspect-ratio: 1;
+      border: 2px solid var(--accent);
+      pointer-events: none;
+    }
+
+    #guide-box::before {
+      content: 'PLACE HAND HERE';
+      position: absolute;
+      top: -22px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.5rem;
+      letter-spacing: 3px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    /* Corner accents */
+    #guide-box::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border: 1px solid rgba(0,255,136,0.2);
+    }
+
+    .controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+    }
+
+    button {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      padding: 10px 20px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+
+    #btn-start {
+      background: var(--accent);
+      color: #000;
+      flex: 1;
+    }
+
+    #btn-start:hover { background: #00cc6a; }
+
+    #btn-stop {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    #btn-stop:hover { color: var(--accent2); border-color: var(--accent2); }
+
+    /* Result panel */
+    .result-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .big-letter {
+      font-family: var(--font-display);
+      font-size: 8rem;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--accent);
+      letter-spacing: -4px;
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      transition: all 0.2s;
+    }
+
+    .big-letter.flash {
+      color: #fff;
+    }
+
+    .confidence-bar-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .conf-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .conf-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    .conf-header .letter { color: var(--text); font-weight: 700; }
+
+    .conf-bar-bg {
+      height: 4px;
+      background: var(--border);
+      width: 100%;
+    }
+
+    .conf-bar {
+      height: 4px;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .conf-bar.second { background: var(--muted); }
+    .conf-bar.third { background: #333; }
+
+    .status {
+      font-size: 0.6rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: auto;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .status-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .history-panel {
+      grid-column: 1 / -1;
+    }
+
+    .history-strip {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 48px;
+      align-items: center;
+    }
+
+    .history-letter {
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--text);
+      animation: popIn 0.2s ease;
+    }
+
+    @keyframes popIn {
+      from { transform: scale(0.5); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .history-letter:last-child { color: var(--accent); }
+
+    .clear-btn {
+      margin-left: auto;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      font-size: 0.6rem;
+      padding: 6px 12px;
+    }
+
+    .clear-btn:hover { color: var(--accent2); border-color: var(--accent2); }
+
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">ASL<span>.</span>live</div>
+    <div class="badge">Real-time translator</div>
+  </header>
+
+  <div class="main">
+    <!-- Camera Panel -->
+    <div class="panel">
+      <div class="panel-label">// Camera feed</div>
+      <div id="video-container">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="guide-box"></div>
+      </div>
+      <div class="controls">
+        <button id="btn-start">Start Camera</button>
+        <button id="btn-stop">Stop</button>
+      </div>
+    </div>
+
+    <!-- Result Panel -->
+    <div class="panel result-panel">
+      <div class="panel-label">// Prediction</div>
+
+      <div class="big-letter" id="big-letter">—</div>
+
+      <div class="confidence-bar-wrap" id="conf-bars">
+        <div class="conf-item">
+          <div class="conf-header">
+            <span class="letter" id="l1">—</span>
+            <span id="p1">0%</span>
+          </div>
+          <div class="conf-bar-bg"><div class="conf-bar" id="b1"></div></div>
+        </div>
+        <div class="conf-item">
+          <div class="conf-header">
+            <span class="letter" id="l2">—</span>
+            <span id="p2">0%</span>
+          </div>
+          <div class="conf-bar-bg"><div class="conf-bar second" id="b2"></div></div>
+        </div>
+        <div class="conf-item">
+          <div class="conf-header">
+            <span class="letter" id="l3">—</span>
+            <span id="p3">0%</span>
+          </div>
+          <div class="conf-bar-bg"><div class="conf-bar third" id="b3"></div></div>
+        </div>
+      </div>
+
+      <div class="status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Camera off</span>
+      </div>
+    </div>
+
+    <!-- History Panel -->
+    <div class="panel history-panel">
+      <div class="panel-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>// Letter history</span>
+        <button class="clear-btn" id="btn-clear">Clear</button>
+      </div>
+      <div class="history-strip" id="history"></div>
+    </div>
+  </div>
+
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const bigLetter = document.getElementById('big-letter');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const history = document.getElementById('history');
+
+    let stream = null;
+    let intervalId = null;
+    let lastLetter = null;
+    let stableCount = 0;
+    const STABLE_THRESHOLD = 3; // letter must appear 3x in a row to be added to history
+
+    document.getElementById('btn-start').addEventListener('click', async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        statusDot.classList.add('active');
+        statusText.textContent = 'Analyzing...';
+        intervalId = setInterval(captureAndPredict, 500);
+      } catch (e) {
+        statusText.textContent = 'Camera error';
+        console.error(e);
+      }
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (intervalId) clearInterval(intervalId);
+      statusDot.classList.remove('active');
+      statusText.textContent = 'Camera off';
+      bigLetter.textContent = '—';
+    });
+
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      history.innerHTML = '';
+    });
+
+    async function captureAndPredict() {
+      if (!video.videoWidth) return;
+
+      // Crop center square (guide box area ~55% of frame)
+      const size = Math.min(video.videoWidth, video.videoHeight) * 0.55;
+      const sx = (video.videoWidth - size) / 2;
+      const sy = (video.videoHeight - size) / 2;
+
+      canvas.width = 28;
+      canvas.height = 28;
+      ctx.drawImage(video, sx, sy, size, size, 0, 0, 28, 28);
+
+      const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+      try {
+        const res = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: imageData })
+        });
+
+        const data = await res.json();
+        if (!data.predictions) return;
+
+        const [p1, p2, p3] = data.predictions;
+
+        // Update big letter
+        bigLetter.textContent = p1.letter;
+        bigLetter.classList.add('flash');
+        setTimeout(() => bigLetter.classList.remove('flash'), 100);
+
+        // Update bars
+        document.getElementById('l1').textContent = p1.letter;
+        document.getElementById('p1').textContent = p1.confidence.toFixed(1) + '%';
+        document.getElementById('b1').style.width = p1.confidence + '%';
+
+        document.getElementById('l2').textContent = p2.letter;
+        document.getElementById('p2').textContent = p2.confidence.toFixed(1) + '%';
+        document.getElementById('b2').style.width = p2.confidence + '%';
+
+        document.getElementById('l3').textContent = p3.letter;
+        document.getElementById('p3').textContent = p3.confidence.toFixed(1) + '%';
+        document.getElementById('b3').style.width = p3.confidence + '%';
+
+        // Stable letter detection for history
+        if (p1.letter === lastLetter) {
+          stableCount++;
+          if (stableCount === STABLE_THRESHOLD) {
+            addToHistory(p1.letter);
+          }
+        } else {
+          lastLetter = p1.letter;
+          stableCount = 1;
+        }
+
+      } catch (e) {
+        statusText.textContent = 'Prediction error';
+      }
+    }
+
+    function addToHistory(letter) {
+      const span = document.createElement('span');
+      span.className = 'history-letter';
+      span.textContent = letter;
+      history.appendChild(span);
+    }
+  </script>
+</body>
+</html>
