@@ -156,17 +156,24 @@ class FSLTranslatorApp:
         # Text-to-Speech
         try:
             self.tts_engine = pyttsx3.init()
-            self.tts_engine.setProperty('rate', 150)  # Speed of speech
+            
+            # Optimize TTS settings for faster response
+            self.tts_engine.setProperty('rate', 180)  # Slightly faster speech
             self.tts_engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
             
-            # Test the engine to make sure it works
+            # Test the engine to make sure it works and pre-warm it
             voices = self.tts_engine.getProperty('voices')
             if voices:
                 # Use the first available voice
                 self.tts_engine.setProperty('voice', voices[0].id)
             
+            # Pre-warm the TTS engine with a silent test
+            self.tts_engine.say("")
+            self.tts_engine.runAndWait()
+            
             self.tts_available = True
-            print("TTS initialized successfully")
+            self._tts_thread = None  # Initialize thread tracker
+            print("TTS initialized and pre-warmed successfully")
         except Exception as e:
             print(f"TTS initialization failed: {e}")
             self.tts_available = False
@@ -271,6 +278,11 @@ class FSLTranslatorApp:
                  bg='#0066aa', fg='#ffffff', font=('Arial', 10),
                  height=1, cursor='hand2').pack(fill=tk.X, pady=2)
         
+        # Quick TTS test button
+        tk.Button(button_frame, text="🎤 Test TTS", command=lambda: self.speak_text("Test"),
+                 bg='#6600aa', fg='#ffffff', font=('Arial', 9),
+                 height=1, cursor='hand2').pack(fill=tk.X, pady=1)
+        
     def load_model(self):
         try:
             self.status_label.config(text="Loading model...", fg='#ffaa00')
@@ -373,33 +385,64 @@ class FSLTranslatorApp:
             self.status_label.config(text="No signs detected", fg='#ff0000')
     
     def speak_text(self, text):
-        """Speak text using TTS in a separate thread"""
-        if not self.tts_available:
-            print("TTS not available")
+        """Speak text using TTS with minimal delay"""
+        if not self.tts_available or not text.strip():
+            print("TTS not available or empty text")
             return
+        
+        # Immediate feedback - show that TTS is starting
+        print(f"Speaking: {text}")
             
         def speak():
             try:
-                # Use the main engine instance but in a thread-safe way
+                # Clear any pending speech first
+                self.tts_engine.stop()
+                
+                # Use the main engine instance with optimized settings
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
+                
             except Exception as e:
                 print(f"TTS error: {e}")
-                # If main engine fails, try creating a new one
+                # Quick backup without full initialization
                 try:
-                    backup_engine = pyttsx3.init()
-                    backup_engine.setProperty('rate', 150)
-                    backup_engine.setProperty('volume', 0.9)
-                    backup_engine.say(text)
-                    backup_engine.runAndWait()
-                    backup_engine.stop()
-                    del backup_engine
+                    import subprocess
+                    import sys
+                    
+                    # Try Windows SAPI for faster speech (Windows only)
+                    if sys.platform == "win32":
+                        # Use Windows built-in speech
+                        subprocess.run([
+                            "powershell", "-Command", 
+                            f"Add-Type -AssemblyName System.Speech; "
+                            f"$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                            f"$speak.Rate = 2; "
+                            f"$speak.Speak('{text.replace(chr(39), chr(39)+chr(39))}');"
+                        ], capture_output=True, timeout=10)
+                    else:
+                        # Fallback for other systems
+                        backup_engine = pyttsx3.init()
+                        backup_engine.setProperty('rate', 180)  # Faster rate
+                        backup_engine.setProperty('volume', 0.9)
+                        backup_engine.say(text)
+                        backup_engine.runAndWait()
+                        backup_engine.stop()
+                        del backup_engine
+                        
                 except Exception as e2:
-                    print(f"Backup TTS also failed: {e2}")
+                    print(f"All TTS methods failed: {e2}")
         
-        # Run TTS in separate thread to avoid blocking UI
-        tts_thread = threading.Thread(target=speak, daemon=True)
-        tts_thread.start()
+        # Use thread pool for better performance
+        if not hasattr(self, '_tts_thread') or not self._tts_thread.is_alive():
+            self._tts_thread = threading.Thread(target=speak, daemon=True)
+            self._tts_thread.start()
+        else:
+            # If previous TTS is still running, queue this one
+            def delayed_speak():
+                self._tts_thread.join(timeout=2)  # Wait max 2 seconds
+                speak()
+            
+            threading.Thread(target=delayed_speak, daemon=True).start()
     
     def reset_tts_engine(self):
         """Reset TTS engine if it gets stuck"""
