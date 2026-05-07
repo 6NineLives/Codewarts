@@ -159,7 +159,15 @@ class FSLTranslatorApp:
             self.tts_engine = pyttsx3.init()
             self.tts_engine.setProperty('rate', 150)  # Speed of speech
             self.tts_engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
+            
+            # Test the engine to make sure it works
+            voices = self.tts_engine.getProperty('voices')
+            if voices:
+                # Use the first available voice
+                self.tts_engine.setProperty('voice', voices[0].id)
+            
             self.tts_available = True
+            print("TTS initialized successfully")
         except Exception as e:
             print(f"TTS initialization failed: {e}")
             self.tts_available = False
@@ -263,6 +271,11 @@ class FSLTranslatorApp:
         tk.Button(button_frame, text="🗑️ Clear All", command=self.clear_all,
                  bg='#aa0000', fg='#ffffff', font=('Arial', 12, 'bold'),
                  height=1, cursor='hand2').pack(fill=tk.X, pady=5)
+        
+        # Reset TTS button
+        tk.Button(button_frame, text="🔄 Reset TTS", command=self.reset_tts_engine,
+                 bg='#0066aa', fg='#ffffff', font=('Arial', 10),
+                 height=1, cursor='hand2').pack(fill=tk.X, pady=2)
         
     def load_model(self):
         try:
@@ -373,19 +386,47 @@ class FSLTranslatorApp:
             
         def speak():
             try:
-                # Create a new engine instance for this thread
-                engine = pyttsx3.init()
-                engine.setProperty('rate', 150)
-                engine.setProperty('volume', 0.9)
-                engine.say(text)
-                engine.runAndWait()
-                engine.stop()
+                # Use the main engine instance but in a thread-safe way
+                self.tts_engine.say(text)
+                self.tts_engine.runAndWait()
             except Exception as e:
                 print(f"TTS error: {e}")
+                # If main engine fails, try creating a new one
+                try:
+                    backup_engine = pyttsx3.init()
+                    backup_engine.setProperty('rate', 150)
+                    backup_engine.setProperty('volume', 0.9)
+                    backup_engine.say(text)
+                    backup_engine.runAndWait()
+                    backup_engine.stop()
+                    del backup_engine
+                except Exception as e2:
+                    print(f"Backup TTS also failed: {e2}")
         
         # Run TTS in separate thread to avoid blocking UI
         tts_thread = threading.Thread(target=speak, daemon=True)
         tts_thread.start()
+    
+    def reset_tts_engine(self):
+        """Reset TTS engine if it gets stuck"""
+        try:
+            if hasattr(self, 'tts_engine') and self.tts_engine:
+                self.tts_engine.stop()
+            
+            # Reinitialize the engine
+            self.tts_engine = pyttsx3.init()
+            self.tts_engine.setProperty('rate', 150)
+            self.tts_engine.setProperty('volume', 0.9)
+            
+            voices = self.tts_engine.getProperty('voices')
+            if voices:
+                self.tts_engine.setProperty('voice', voices[0].id)
+            
+            print("TTS engine reset successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to reset TTS engine: {e}")
+            return False
     
     def process_video(self):
         """Process video frames continuously (simplified approach)"""
