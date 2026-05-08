@@ -19,11 +19,11 @@ import os
 import pyttsx3
 
 # ==========================================
-# CONFIGURATION
+# CONFIGURATION - INCREASED SENSITIVITY
 # ==========================================
-CONFIDENCE_THRESHOLD = 0.65
-STABILITY_WINDOW = 15
-MIN_SIGN_DURATION = 20
+CONFIDENCE_THRESHOLD = 0.45  # Lowered from 0.65 for easier detection
+STABILITY_WINDOW = 12         # Reduced from 15 for faster response
+MIN_SIGN_DURATION = 15        # Reduced from 20 for quicker recognition
 SEQUENCE_LENGTH = 30
 
 # ==========================================
@@ -49,7 +49,7 @@ class SignStabilizer:
             
             stability_ratio = most_common_count / self.window_size
             
-            if stability_ratio >= 0.6 and avg_confidence >= CONFIDENCE_THRESHOLD:
+            if stability_ratio >= 0.5 and avg_confidence >= CONFIDENCE_THRESHOLD:  # Lowered from 0.6 to 0.5
                 if most_common_idx == self.current_sign:
                     self.current_sign_count += 1
                 else:
@@ -154,27 +154,35 @@ class FSLTranslatorApp:
         self.mp_drawing = mp.solutions.drawing_utils
         self.holistic = None
         
-        # Text-to-Speech
+        # Text-to-Speech - Simplified and reliable
         try:
             self.tts_engine = pyttsx3.init()
             
-            # Optimize TTS settings for faster response
-            self.tts_engine.setProperty('rate', 180)  # Slightly faster speech
-            self.tts_engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
+            # Set TTS properties
+            self.tts_engine.setProperty('rate', 180)
+            self.tts_engine.setProperty('volume', 0.9)
             
-            # Test the engine to make sure it works and pre-warm it
+            # Get and set voice
             voices = self.tts_engine.getProperty('voices')
             if voices:
-                # Use the first available voice
                 self.tts_engine.setProperty('voice', voices[0].id)
-            
-            # Pre-warm the TTS engine with a silent test
-            self.tts_engine.say("")
-            self.tts_engine.runAndWait()
+                print(f"TTS voice set to: {voices[0].name}")
             
             self.tts_available = True
-            self._tts_thread = None  # Initialize thread tracker
-            print("TTS initialized and pre-warmed successfully")
+            print("TTS initialized successfully")
+            
+            # Test TTS immediately
+            def test_tts():
+                try:
+                    self.tts_engine.say("TTS ready")
+                    self.tts_engine.runAndWait()
+                    print("TTS test successful")
+                except Exception as e:
+                    print(f"TTS test failed: {e}")
+            
+            # Run test in background
+            threading.Thread(target=test_tts, daemon=True).start()
+            
         except Exception as e:
             print(f"TTS initialization failed: {e}")
             self.tts_available = False
@@ -279,15 +287,29 @@ class FSLTranslatorApp:
                  bg='#aa0000', fg='#ffffff', font=('Arial', 12, 'bold'),
                  height=1, cursor='hand2').pack(fill=tk.X, pady=5)
         
-        # Reset TTS button
-        tk.Button(button_frame, text="🔄 Reset TTS", command=self.reset_tts_engine,
-                 bg='#0066aa', fg='#ffffff', font=('Arial', 10),
-                 height=1, cursor='hand2').pack(fill=tk.X, pady=2)
+        # Sensitivity controls
+        sensitivity_frame = tk.LabelFrame(right_frame, text="Sensitivity Controls", 
+                                         font=('Arial', 10, 'bold'), bg='#2d2d2d', fg='#ffffff')
+        sensitivity_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Quick TTS test button
-        tk.Button(button_frame, text="🎤 Test TTS", command=lambda: self.speak_text("Test"),
-                 bg='#6600aa', fg='#ffffff', font=('Arial', 9),
-                 height=1, cursor='hand2').pack(fill=tk.X, pady=1)
+        # Confidence threshold slider
+        tk.Label(sensitivity_frame, text="Detection Sensitivity", 
+                font=('Arial', 9), bg='#2d2d2d', fg='#ffffff').pack(pady=2)
+        
+        self.confidence_var = tk.DoubleVar(value=CONFIDENCE_THRESHOLD)
+        self.confidence_scale = tk.Scale(sensitivity_frame, from_=0.2, to=0.8, 
+                                        resolution=0.05, orient=tk.HORIZONTAL,
+                                        variable=self.confidence_var,
+                                        bg='#3d3d3d', fg='#ffffff',
+                                        highlightbackground='#2d2d2d',
+                                        command=self.update_sensitivity)
+        self.confidence_scale.pack(fill=tk.X, padx=10, pady=2)
+        
+        # Current sensitivity display
+        self.sensitivity_label = tk.Label(sensitivity_frame, 
+                                         text=f"Current: {CONFIDENCE_THRESHOLD:.2f} (Higher = Less Sensitive)", 
+                                         font=('Arial', 8), bg='#2d2d2d', fg='#ffaa00')
+        self.sensitivity_label.pack(pady=2)
         
     def load_model(self):
         try:
@@ -338,10 +360,10 @@ class FSLTranslatorApp:
             if not ret:
                 raise Exception("Could not read from camera")
             
-            # Initialize MediaPipe
+            # Initialize MediaPipe with higher sensitivity
             self.holistic = self.mp_holistic.Holistic(
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
+                min_detection_confidence=0.3,  # Lowered from 0.5 for better detection
+                min_tracking_confidence=0.3    # Lowered from 0.5 for better tracking
             )
             
             self.video_running = True
@@ -377,6 +399,10 @@ class FSLTranslatorApp:
         self.start_button.config(text="▶ Start Collecting Signs", bg='#0088aa')
         self.status_label.config(text="Building sentence...", fg='#ffaa00')
         
+        # Refresh TTS engine before speaking to ensure it works
+        if self.tts_available:
+            self.refresh_tts_engine()
+        
         # Generate final translation using SentenceBuilder
         if self.detected_signs:
             translation = self.sentence_builder.build_sentence(self.detected_signs)
@@ -391,85 +417,80 @@ class FSLTranslatorApp:
             self.status_label.config(text="No signs detected", fg='#ff0000')
     
     def speak_text(self, text):
-        """Speak text using TTS with minimal delay"""
+        """Speak text using TTS - simplified and reliable"""
         if not self.tts_available or not text.strip():
             print("TTS not available or empty text")
             return
         
-        # Immediate feedback - show that TTS is starting
+        # Immediate feedback
         print(f"Speaking: {text}")
             
         def speak():
             try:
-                # Clear any pending speech first
-                self.tts_engine.stop()
-                
-                # Use the main engine instance with optimized settings
+                # Simple, reliable TTS approach
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
+                print("TTS completed successfully")
                 
             except Exception as e:
-                print(f"TTS error: {e}")
-                # Quick backup without full initialization
+                print(f"Primary TTS error: {e}")
+                # Simple backup - create fresh engine
                 try:
-                    import subprocess
-                    import sys
-                    
-                    # Try Windows SAPI for faster speech (Windows only)
-                    if sys.platform == "win32":
-                        # Use Windows built-in speech
-                        subprocess.run([
-                            "powershell", "-Command", 
-                            f"Add-Type -AssemblyName System.Speech; "
-                            f"$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                            f"$speak.Rate = 2; "
-                            f"$speak.Speak('{text.replace(chr(39), chr(39)+chr(39))}');"
-                        ], capture_output=True, timeout=10)
-                    else:
-                        # Fallback for other systems
-                        backup_engine = pyttsx3.init()
-                        backup_engine.setProperty('rate', 180)  # Faster rate
-                        backup_engine.setProperty('volume', 0.9)
-                        backup_engine.say(text)
-                        backup_engine.runAndWait()
-                        backup_engine.stop()
-                        del backup_engine
-                        
+                    backup_engine = pyttsx3.init()
+                    backup_engine.setProperty('rate', 180)
+                    backup_engine.setProperty('volume', 0.9)
+                    backup_engine.say(text)
+                    backup_engine.runAndWait()
+                    backup_engine.stop()
+                    print("Backup TTS completed")
                 except Exception as e2:
-                    print(f"All TTS methods failed: {e2}")
+                    print(f"Backup TTS also failed: {e2}")
         
-        # Use thread pool for better performance
-        if not hasattr(self, '_tts_thread') or not self._tts_thread.is_alive():
-            self._tts_thread = threading.Thread(target=speak, daemon=True)
-            self._tts_thread.start()
-        else:
-            # If previous TTS is still running, queue this one
-            def delayed_speak():
-                self._tts_thread.join(timeout=2)  # Wait max 2 seconds
-                speak()
-            
-            threading.Thread(target=delayed_speak, daemon=True).start()
+        # Run in thread to avoid blocking UI
+        tts_thread = threading.Thread(target=speak, daemon=True)
+        tts_thread.start()
     
-    def reset_tts_engine(self):
-        """Reset TTS engine if it gets stuck"""
+    def refresh_tts_engine(self):
+        """Refresh TTS engine to ensure it works reliably"""
         try:
+            # Stop any pending speech
             if hasattr(self, 'tts_engine') and self.tts_engine:
-                self.tts_engine.stop()
+                try:
+                    self.tts_engine.stop()
+                except:
+                    pass
             
-            # Reinitialize the engine
+            # Reinitialize the engine with consistent settings
             self.tts_engine = pyttsx3.init()
-            self.tts_engine.setProperty('rate', 150)
+            self.tts_engine.setProperty('rate', 180)
             self.tts_engine.setProperty('volume', 0.9)
             
             voices = self.tts_engine.getProperty('voices')
             if voices:
                 self.tts_engine.setProperty('voice', voices[0].id)
             
-            print("TTS engine reset successfully")
+            print("TTS engine refreshed successfully")
             return True
         except Exception as e:
-            print(f"Failed to reset TTS engine: {e}")
+            print(f"Failed to refresh TTS engine: {e}")
             return False
+    
+    def update_sensitivity(self, value):
+        """Update detection sensitivity in real-time"""
+        global CONFIDENCE_THRESHOLD
+        CONFIDENCE_THRESHOLD = float(value)
+        
+        # Update the stabilizer with new threshold
+        self.stabilizer = SignStabilizer()
+        
+        # Update display
+        self.sensitivity_label.config(text=f"Current: {CONFIDENCE_THRESHOLD:.2f} (Higher = Less Sensitive)")
+        
+        print(f"Sensitivity updated: {CONFIDENCE_THRESHOLD:.2f}")
+        
+        # Show feedback in status
+        self.status_label.config(text=f"Sensitivity: {CONFIDENCE_THRESHOLD:.2f}", fg='#ffaa00')
+        self.root.after(2000, lambda: self.status_label.config(text="Ready", fg='#00ff00'))
     
     def process_video(self):
         """Process video frames continuously (simplified approach)"""
