@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0F172A;
+  --color-foreground: #DAE2FD;
+  --color-primary: #2DD4BF;
+  --color-secondary: #3B82F6;
+  --color-panel: rgba(30, 41, 59, 0.6);
+  
+  --font-sans: "Inter", var(--font-geist-sans);
+  --font-mono: "JetBrains Mono", var(--font-geist-mono);
+  --font-display: "Geist", var(--font-geist-sans);
+
+  --radius-2xl: 1.5rem;
+}
+
+:root {
+  --background: #0F172A;
+  --foreground: #DAE2FD;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.glass {
+  background: var(--color-panel);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glow-primary {
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
+}
