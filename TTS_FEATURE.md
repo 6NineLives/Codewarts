@@ -1,5 +1,10 @@
 # 🔊 Text-to-Speech Feature
 
+> [!NOTE]
+> **Gemma AI integration is planned for a future release.** The sections below 
+> describe the intended AI-powered translation workflow. The current version 
+> uses a local rule-based sentence builder that works fully offline.
+
 ## Overview
 
 The FSL Translator now includes **automatic text-to-speech** that reads the translation aloud when you stop collecting signs!

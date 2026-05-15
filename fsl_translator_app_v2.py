@@ -18,6 +18,9 @@ import threading
 import os
 import pyttsx3
 
+# Resolve paths relative to this script, not the working directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ==========================================
 # CONFIGURATION
 # ==========================================
@@ -295,7 +298,8 @@ class FSLTranslatorApp:
             self.root.update()
             
             # Load actions
-            self.actions = np.load('models/action_labels.npy', allow_pickle=True)
+            labels_path = os.path.join(BASE_DIR, 'models', 'action_labels.npy')
+            self.actions = np.load(labels_path, allow_pickle=True)
             
             # Build model
             self.model = Sequential()
@@ -312,7 +316,8 @@ class FSLTranslatorApp:
                              metrics=['categorical_accuracy'])
             
             # Load weights from MODEL 2
-            self.model.load_weights('models/fsl_105_model_2.h5')
+            model_path = os.path.join(BASE_DIR, 'models', 'fsl_105_model_2.h5')
+            self.model.load_weights(model_path)
             
             self.status_label.config(text=f"Model V2 loaded ({len(self.actions)} signs)", fg='#00ff00')
             

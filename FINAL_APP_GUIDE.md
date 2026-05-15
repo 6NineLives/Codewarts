@@ -8,6 +8,11 @@ A **complete desktop application** with modern UI that translates Filipino Sign 
 
 ## ✨ Key Features
 
+> [!NOTE]
+> **Gemma AI integration is planned for a future release.** The sections below 
+> describe the intended AI-powered translation workflow. The current version 
+> uses a local rule-based sentence builder that works fully offline.
+
 ### 1. **Modern Dark UI**
 - Clean, professional interface
 - Real-time video feed

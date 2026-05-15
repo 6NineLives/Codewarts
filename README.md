@@ -13,22 +13,31 @@ We implement a Filipino Sign Language Recognition model for both static and dyna
 
 ## 🚀 Quick Start
 
-### Installation
-```shell
-# Create virtual environment (optional)
-conda create --name fsl-translator python=3.11 -y
-conda activate fsl-translator
+### Prerequisites
+- **Python 3.11** (required — [download here](https://www.python.org/downloads/release/python-3119/))
+- A webcam
 
-# Install dependencies
+### Installation (Windows)
+```shell
+# Option 1: Automated setup (recommended)
+# Double-click setup.bat, or run:
+.\setup.bat
+
+# Option 2: Manual setup
+py -3.11 -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Test Your Model with Webcam
-```bash
-cd model-processing
-python test_live.py
+### Run the App
+```shell
+# Double-click run_app.bat, or:
+venv\Scripts\activate
+python fsl_translator_app.py
 ```
-Press `Q` to quit the webcam feed.
+
+> **Note:** Gemma AI-powered translation is planned for a future release. 
+> The current version uses a local rule-based sentence builder.
 
 ## 📁 Project Structure
 
@@ -79,7 +88,7 @@ See `models/action_labels.npy` for the complete list.
 
 ## 🔧 Requirements
 
-- Python 3.9+
+- Python 3.11 (Required)
 - TensorFlow
 - MediaPipe 0.10.21
 - OpenCV

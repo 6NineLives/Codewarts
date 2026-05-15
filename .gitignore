@@ -1,1 +1,50 @@
-/web-application/node_modules
+# ========================
+# Python
+# ========================
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ========================
+# OS generated
+# ========================
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ========================
+# Logs
+# ========================
+Logs/
+*.log
+
+# ========================
+# Node (for future web frontend)
+# ========================
+node_modules/
+
+# ========================
+# Model backups (originals are tracked)
+# ========================
+models/*.backup

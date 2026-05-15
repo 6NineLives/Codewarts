@@ -19,7 +19,7 @@
 
 ## What Changed
 
-### Removed:
+### Removed (temporarily — Gemma AI integration planned for future release):
 - ❌ All Gemma AI integration code
 - ❌ Ollama dependencies
 - ❌ Google Generative AI imports

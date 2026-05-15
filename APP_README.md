@@ -8,6 +8,11 @@ A complete, user-friendly desktop application for real-time Filipino Sign Langua
 
 ## ✨ Features
 
+> [!NOTE]
+> **Gemma AI integration is planned for a future release.** The sections below 
+> describe the intended AI-powered translation workflow. The current version 
+> uses a local rule-based sentence builder that works fully offline.
+
 ### 🎥 Real-Time Sign Detection
 - Live webcam feed with MediaPipe landmark visualization
 - Stabilized detection to reduce fluctuation
