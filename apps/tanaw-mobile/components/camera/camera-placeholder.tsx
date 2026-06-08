@@ -7,7 +7,7 @@ type CameraPlaceholderProps = {
 
 export function CameraPlaceholder({ showLoading = false }: CameraPlaceholderProps) {
   return (
-    <View className="flex-1 bg-charcoal items-center justify-center">
+    <View className="absolute inset-0 bg-charcoal items-center justify-center">
       {showLoading ? <ActivityIndicator color="#F9FFE3" /> : null}
     </View>
   );

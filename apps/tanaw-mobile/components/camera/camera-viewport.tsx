@@ -107,7 +107,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
 
     if (!permission) {
       return (
-        <View className="flex-1 bg-charcoal items-center justify-center">
+        <View className="absolute inset-0 bg-charcoal items-center justify-center">
           <ActivityIndicator color="#F9FFE3" />
         </View>
       );
@@ -115,7 +115,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
 
     if (!permission.granted) {
       return (
-        <View className="flex-1 bg-charcoal items-center justify-center px-8">
+        <View className="absolute inset-0 bg-charcoal items-center justify-center px-8">
           <Text className="text-cream font-jua text-lg text-center mb-4">
             Camera access is required for sign language translation and recording.
           </Text>
@@ -132,10 +132,10 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
     }
 
     return (
-      <View className="flex-1 bg-black">
+      <View className="absolute inset-0">
         <CameraView
           ref={cameraRef}
-          style={styles.camera}
+          style={StyleSheet.absoluteFill}
           facing={facing}
           active={isActive}
           mode={cameraMode}
@@ -174,9 +174,6 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
 );
 
 const styles = StyleSheet.create({
-  camera: {
-    flex: 1,
-  },
   bonesOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 2,

@@ -10,7 +10,7 @@ type TanawShellProps = {
 /** App shell content slot. Bottom nav is rendered by tab layout. */
 export function TanawShell({ children, fullBleed = false }: TanawShellProps) {
   return (
-    <View className="flex-1 bg-black">
+    <View className="flex-1 bg-cream">
       {children}
     </View>
   );

@@ -121,7 +121,7 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
 
     if (!hasPermission) {
       return (
-        <View className="flex-1 bg-charcoal items-center justify-center px-8">
+        <View className="absolute inset-0 bg-charcoal items-center justify-center px-8">
           <Text className="text-cream font-jua text-lg text-center mb-4">
             Camera permission is required for live sign tracking.
           </Text>
@@ -137,7 +137,7 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
 
     if (!device) {
       return (
-        <View className="flex-1 bg-charcoal items-center justify-center">
+        <View className="absolute inset-0 bg-charcoal items-center justify-center">
           <ActivityIndicator color="#F9FFE3" />
         </View>
       );
@@ -145,7 +145,7 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
 
     if (fatalError) {
       return (
-        <View className="flex-1 bg-charcoal items-center justify-center px-8">
+        <View className="absolute inset-0 bg-charcoal items-center justify-center px-8">
           <Text className="text-cream font-jua text-lg text-center mb-2">Camera unavailable</Text>
           <Text className="text-cream/70 font-jua text-sm text-center mb-6 leading-5">
             {fatalError.includes('device policy')
@@ -160,13 +160,14 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
     }
 
     return (
-      <View className="flex-1 bg-black" onLayout={onLayout}>
+      <View className="absolute inset-0" onLayout={onLayout}>
         <Camera
           key={`${sessionKey}-${facing}`}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={isActive}
+          resizeMode="cover"
           onError={(error) => handleFatalError(error.message)}
           onPreviewStarted={() => {
             if (!isActive) return;

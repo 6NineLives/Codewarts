@@ -9,7 +9,7 @@ type ChallengeCardProps = {
 
 export function ChallengeCard({ challenge }: ChallengeCardProps) {
   return (
-    <View className="bg-cream/90 rounded-card px-7 py-5 mx-6 mt-2">
+    <View className="bg-cream/60 rounded-card px-7 py-5">
       <View className="flex-row items-start justify-between">
         <View className="flex-1 pr-4">
           <View className="flex-row items-center gap-2 mb-2">
