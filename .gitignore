@@ -3,3 +3,8 @@
 /apps/tanaw-mobile/dist-web
 /apps/tanaw-mobile/.expo
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
