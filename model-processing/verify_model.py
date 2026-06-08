@@ -2,6 +2,7 @@
 Quick verification script to check if your model is compatible
 """
 import numpy as np
+import joblib
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
@@ -13,7 +14,7 @@ print("=" * 60)
 
 # Load actions
 try:
-    actions = np.load('../models/action_labels.npy', allow_pickle=True)
+    actions = np.load('../models/action_labels_11.npy', allow_pickle=True)
     print(f"✓ Actions loaded: {len(actions)} actions")
     print(f"  Sample actions: {actions[:5]}")
 except Exception as e:
@@ -46,16 +47,24 @@ except Exception as e:
 
 # Load weights
 try:
-    model.load_weights('../models/fsl_105_model.h5')
-    print(f"✓ Model weights loaded from fsl_105_model.h5")
+    model.load_weights('../models/fsl_11_model.h5')
+    print(f"✓ Model weights loaded from fsl_11_model.h5 ({len(actions)} classes)")
 except Exception as e:
     print(f"✗ Error loading model weights: {e}")
     exit(1)
 
+# Load scaler
+try:
+    scaler = joblib.load('../models/scaler.pkl')
+    print(f"✓ Scaler loaded from scaler.pkl ({scaler.n_features_in_} features per frame)")
+except Exception as e:
+    print(f"✗ Error loading scaler: {e}")
+    exit(1)
+
 # Test prediction with dummy data
 try:
-    dummy_sequence = np.random.rand(1, 30, 258)
-    prediction = model.predict(dummy_sequence, verbose=0)
+    dummy_sequence = scaler.transform(np.random.rand(30, 258).astype(np.float32))
+    prediction = model.predict(np.expand_dims(dummy_sequence, axis=0), verbose=0)
     predicted_action = actions[np.argmax(prediction[0])]
     confidence = np.max(prediction[0])
     print(f"✓ Test prediction successful")

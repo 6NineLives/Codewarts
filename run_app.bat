@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo Filipino Sign Language Translator
+echo Senyas FSL Translator — 15-sign LSTM
 echo ========================================
 echo.
 echo Starting application...

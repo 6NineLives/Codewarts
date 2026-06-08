@@ -3,6 +3,7 @@
 # 1. `Installing Dependencies`
 import os
 import numpy as np
+import joblib
 import mediapipe as mp
 import cv2
 import tensorflow as tf
@@ -60,8 +61,8 @@ def extract_keypoints(results):
     return np.concatenate([pose, lh, rh]) # single row of data for each image
 
 # Actions that we try to detect - loaded from your trained model
-actions = np.load('../models/action_labels.npy', allow_pickle=True)
-print(f"Loaded {len(actions)} actions from action_labels.npy")
+actions = np.load('../models/action_labels_11.npy', allow_pickle=True)
+print(f"Loaded {len(actions)} actions from action_labels_11.npy")
 sequence_length = 30
 
 # 5. Call Model
@@ -86,8 +87,11 @@ model.compile(optimizer='Adam', loss='categorical_crossentropy', metrics=['categ
 model.summary()
 
 # 6. `Load` Model
-model.load_weights('../models/fsl_105_model.h5')
-print("Model Loaded Successfully from fsl_105_model.h5")
+model.load_weights('../models/fsl_11_model.h5')
+print("Model Loaded Successfully from fsl_11_model.h5")
+
+scaler = joblib.load('../models/scaler.pkl')
+print("Scaler loaded from scaler.pkl")
 
 # 7. `Live Test` the Model Accuracy
 from scipy import stats
@@ -95,8 +99,9 @@ from scipy import stats
 colors = [(245,117,16), (117,245,16), (16,117,245)]
 def prob_viz(res, actions, input_frame, colors):
     output_frame = input_frame.copy()
-    # Show only top 5 predictions to avoid cluttering the screen
-    top_indices = np.argsort(res)[-5:][::-1]
+    # Show top predictions (up to 5, or all classes if fewer)
+    top_k = min(5, len(actions))
+    top_indices = np.argsort(res)[-top_k:][::-1]
     for num, idx in enumerate(top_indices):
         prob = res[idx]
         cv2.rectangle(output_frame, (0,60+num*40), (int(prob*100), 90+num*40), colors[num % len(colors)], -1)
@@ -133,7 +138,9 @@ with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=
         sequence = sequence[-30:]
         
         if len(sequence) == 30:
-            res = model.predict(np.expand_dims(sequence, axis=0))[0]
+            seq_array = np.array(sequence, dtype=np.float32)
+            seq_scaled = scaler.transform(seq_array.reshape(-1, seq_array.shape[-1]))
+            res = model.predict(np.expand_dims(seq_scaled, axis=0), verbose=0)[0]
             print(actions[np.argmax(res)])
             predictions.append(np.argmax(res))
             

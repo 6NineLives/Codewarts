@@ -1,612 +1,633 @@
 """
-Filipino Sign Language Translator - Final Version
-Modern UI with Simple Sentence Builder
+Filipino Sign Language Translator — real-time recognition with Gemini semantic layer.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, filedialog
 import cv2
 from PIL import Image, ImageTk
 import numpy as np
-import mediapipe as mp
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Conv1D
 from tensorflow.keras.regularizers import l2
-from collections import deque
 import threading
-import os
 import pyttsx3
+import joblib
+from pathlib import Path
+from datetime import datetime
+from collections import deque
+import time
 
-# ==========================================
-# CONFIGURATION - INCREASED SENSITIVITY
-# ==========================================
-CONFIDENCE_THRESHOLD = 0.45  # Lowered from 0.65 for easier detection
-STABILITY_WINDOW = 12         # Reduced from 15 for faster response
-MIN_SIGN_DURATION = 15        # Reduced from 20 for quicker recognition
+from fsl_landmarks import HolisticTracker, KEYPOINT_DIM
+from semantic_layer import SemanticInterpreter
+
+BASE_DIR = Path(__file__).resolve().parent
+MODELS_DIR = BASE_DIR / "models"
+FSL_15_DIR = MODELS_DIR / "fsl_15_lstm"
+LABELS_PATH = FSL_15_DIR / "action_labels_15.npy"
+SCALER_PATH = FSL_15_DIR / "scaler.pkl"
+MODEL_CANDIDATES = [
+    FSL_15_DIR / "fsl_15_model.h5",
+    FSL_15_DIR / "training" / "best_model.h5",
+    FSL_15_DIR / "training" / "final_model.h5",
+    MODELS_DIR / "fsl_15_model.h5",
+    MODELS_DIR / "fsl_11_model.h5",
+]
 SEQUENCE_LENGTH = 30
+PREDICTION_CONFIDENCE_THRESHOLD = 0.70
+MAX_LIVE_SIGNS = 20
+STABLE_FRAMES_TO_RECORD = 10   # ~0.3s same prediction → record sign
+SIGN_COOLDOWN_FRAMES = 12
+GEMINI_DEBOUNCE_SEC = 0.8
 
-# ==========================================
-# SIGN STABILIZER
-# ==========================================
-class SignStabilizer:
-    def __init__(self, window_size=STABILITY_WINDOW, min_duration=MIN_SIGN_DURATION):
-        self.window_size = window_size
-        self.min_duration = min_duration
-        self.prediction_history = deque(maxlen=window_size)
-        self.current_sign = None
-        self.current_sign_count = 0
-        
-    def add_prediction(self, predicted_idx, confidence):
-        self.prediction_history.append((predicted_idx, confidence))
-        
-        if len(self.prediction_history) >= self.window_size:
-            predictions = [p[0] for p in self.prediction_history]
-            unique, counts = np.unique(predictions, return_counts=True)
-            most_common_idx = unique[np.argmax(counts)]
-            most_common_count = np.max(counts)
-            avg_confidence = np.mean([c for p, c in self.prediction_history if p == most_common_idx])
-            
-            stability_ratio = most_common_count / self.window_size
-            
-            if stability_ratio >= 0.5 and avg_confidence >= CONFIDENCE_THRESHOLD:  # Lowered from 0.6 to 0.5
-                if most_common_idx == self.current_sign:
-                    self.current_sign_count += 1
-                else:
-                    self.current_sign = most_common_idx
-                    self.current_sign_count = 1
-                
-                if self.current_sign_count >= self.min_duration:
-                    return most_common_idx, avg_confidence, True
-        
-        return None, 0, False
-    
-    def reset(self):
-        self.current_sign = None
-        self.current_sign_count = 0
-        self.prediction_history.clear()
+# Video / latency tuning
+ASPECT_RATIO = 16 / 9
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 360          # 16:9 capture
+TRACKER_PROCESS_WIDTH = 480
+DISPLAY_INTERVAL_MS = 16          # ~60 fps UI cap
+INFERENCE_EVERY_N_FRAMES = 2      # LSTM runs every N processed frames
+UI_LABEL_MIN_INTERVAL_MS = 80     # throttle live sign label updates
+DROP_STALE_CAMERA_FRAMES = 2      # grab() skips buffered old frames
 
-# ==========================================
-# SIMPLE SENTENCE BUILDER (No AI needed)
-# ==========================================
-class SentenceBuilder:
+# Minimal palette
+BG = "#0f0f0f"
+BAR_BG = "#1a1a1a"
+TEXT = "#e8e8e8"
+MUTED = "#888888"
+ACCENT = "#4a9eff"
+TRANSCRIPT_FG = "#7dcea0"
+
+
+def prepare_model_input(sequence, scaler):
+    seq_array = np.array(sequence, dtype=np.float32)
+    seq_reshaped = seq_array.reshape(-1, seq_array.shape[-1])
+    seq_scaled = scaler.transform(seq_reshaped)
+    return np.expand_dims(seq_scaled, axis=0)
+
+
+def crop_to_aspect_ratio(frame: np.ndarray, aspect_ratio: float = ASPECT_RATIO) -> np.ndarray:
+    """Center-crop frame to the target aspect ratio (default 16:9)."""
+    h, w = frame.shape[:2]
+    if h == 0 or w == 0:
+        return frame
+    current_ratio = w / h
+    if abs(current_ratio - aspect_ratio) < 0.01:
+        return frame
+    if current_ratio > aspect_ratio:
+        new_w = int(h * aspect_ratio)
+        x0 = (w - new_w) // 2
+        return frame[:, x0 : x0 + new_w]
+    new_h = int(w / aspect_ratio)
+    y0 = (h - new_h) // 2
+    return frame[y0 : y0 + new_h, :]
+
+
+def fit_aspect_size(container_w: int, container_h: int, aspect_ratio: float = ASPECT_RATIO) -> tuple[int, int]:
+    """Largest (w, h) that fits inside the container at the given aspect ratio."""
+    if container_w <= 0 or container_h <= 0:
+        return 640, 360
+    if container_w / container_h > aspect_ratio:
+        h = container_h
+        w = int(h * aspect_ratio)
+    else:
+        w = container_w
+        h = int(w / aspect_ratio)
+    return max(w, 1), max(h, 1)
+
+
+def letterbox_frame(frame: np.ndarray, container_w: int, container_h: int) -> np.ndarray:
+    """Scale frame to 16:9 inside the container and pad with black bars."""
+    rw, rh = fit_aspect_size(container_w, container_h)
+    scaled = cv2.resize(frame, (rw, rh), interpolation=cv2.INTER_LINEAR)
+    if rw == container_w and rh == container_h:
+        return scaled
+    canvas = np.zeros((container_h, container_w, 3), dtype=np.uint8)
+    x0 = (container_w - rw) // 2
+    y0 = (container_h - rh) // 2
+    canvas[y0 : y0 + rh, x0 : x0 + rw] = scaled
+    return canvas
+
+
+def resolve_model_path():
+    for path in MODEL_CANDIDATES:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f"No model found. Expected one of: {[str(p) for p in MODEL_CANDIDATES]}"
+    )
+
+
+def load_fsl_model(num_classes):
+    model_path = resolve_model_path()
+    try:
+        print(f"Loading model from {model_path}")
+        return load_model(str(model_path))
+    except Exception:
+        model = Sequential([
+            Conv1D(64, kernel_size=3, activation="relu", input_shape=(SEQUENCE_LENGTH, KEYPOINT_DIM)),
+            Dropout(0.3),
+            LSTM(64, return_sequences=True, kernel_regularizer=l2(0.001)),
+            Dropout(0.5),
+            LSTM(128, return_sequences=False, kernel_regularizer=l2(0.001)),
+            Dropout(0.5),
+            Dense(64, activation="relu", kernel_regularizer=l2(0.001)),
+            Dropout(0.3),
+            Dense(num_classes, activation="softmax"),
+        ])
+        model.load_weights(str(model_path))
+        return model
+
+
+def append_sign_no_spam(sign_list, sign, max_len=MAX_LIVE_SIGNS):
+    if sign_list and sign == sign_list[-1]:
+        return False
+    sign_list.append(sign)
+    if len(sign_list) > max_len:
+        del sign_list[:-max_len]
+    return True
+
+
+class StableSignDetector:
+    """Record a sign when the model holds the same label for several frames."""
+
     def __init__(self):
-        # Common patterns for natural sentences
-        self.greetings = ['HELLO', 'HI', 'GOOD_MORNING', 'GOOD_AFTERNOON', 'GOOD_EVENING']
-        self.questions = ['HOW', 'WHAT', 'WHERE', 'WHEN', 'WHY', 'WHO']
-        self.connectors = {
-            'GOOD_MORNING': 'Good morning',
-            'GOOD_AFTERNOON': 'Good afternoon',
-            'GOOD_EVENING': 'Good evening',
-            'NICE_TO_MEET_YOU': "Nice to meet you",
-            'HOW_ARE_YOU': "How are you",
-            'THANK_YOU': "Thank you",
-            'YOURE_WELCOME': "You're welcome",
-            'SEE_YOU_TOMORROW': "See you tomorrow",
-            'IM_FINE': "I'm fine",
-            'DONT_KNOW': "I don't know",
-            'DONT_UNDERSTAND': "I don't understand"
-        }
-    
-    def build_sentence(self, signs):
-        """Convert signs into a natural sentence"""
-        if not signs:
-            return ""
-        
-        # Handle multi-word phrases first
-        result = []
-        i = 0
-        while i < len(signs):
-            sign = signs[i]
-            
-            # Check if it's a known phrase
-            if sign in self.connectors:
-                result.append(self.connectors[sign])
-            else:
-                # Convert underscore to space and title case
-                word = sign.replace('_', ' ').title()
-                result.append(word)
-            
-            i += 1
-        
-        # Join words
-        sentence = ' '.join(result)
-        
-        # Add punctuation
-        if any(q in signs for q in self.questions):
-            sentence += '?'
-        elif any(g in signs for g in self.greetings):
-            sentence += '!'
-        else:
-            sentence += '.'
-        
-        # Capitalize first letter
-        if sentence:
-            sentence = sentence[0].upper() + sentence[1:]
-        
-        return sentence
+        self.reset()
 
-# ==========================================
-# MAIN APPLICATION
-# ==========================================
+    def reset(self):
+        self.cooldown = 0
+        self.candidate = None
+        self.streak = 0
+
+    def update(self, sign, confidence, threshold):
+        if self.cooldown > 0:
+            self.cooldown -= 1
+            return None
+
+        if not sign or confidence < threshold:
+            self.candidate = None
+            self.streak = 0
+            return None
+
+        if sign == self.candidate:
+            self.streak += 1
+        else:
+            self.candidate = sign
+            self.streak = 1
+
+        if self.streak >= STABLE_FRAMES_TO_RECORD:
+            recorded = self.candidate
+            self.candidate = None
+            self.streak = 0
+            self.cooldown = SIGN_COOLDOWN_FRAMES
+            return recorded
+        return None
+
+
 class FSLTranslatorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Filipino Sign Language Translator")
-        self.root.geometry("1400x900")
-        self.root.configure(bg='#1e1e1e')
-        
-        # State variables
-        self.is_collecting = False
+        self.root.title("Senyas FSL Translator")
+        self.root.geometry("1100x780")
+        self.root.configure(bg=BG)
+        self.root.minsize(900, 640)
+
+        self.is_translating = False
+        self.show_bones = True
+        self.is_recording_video = False
+        self.video_writer = None
+        self.record_path = None
+
         self.cap = None
+        self.tracker = None
         self.model = None
+        self.scaler = None
         self.actions = None
-        self.stabilizer = SignStabilizer()
-        self.sentence_builder = SentenceBuilder()
+        self.semantic = SemanticInterpreter()
+
         self.detected_signs = []
-        self.sequence = []
+        self.current_label = "—"
+        self.transcript = ""
+        self.last_spoken = ""
+        self.confidence_threshold = PREDICTION_CONFIDENCE_THRESHOLD
+
+        self.sign_detector = StableSignDetector()
+        self.sequence = deque(maxlen=SEQUENCE_LENGTH)
         self.video_running = False
         self.current_frame = None
         self.frame_lock = threading.Lock()
-        
-        # MediaPipe
-        self.mp_holistic = mp.solutions.holistic
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.holistic = None
-        
-        # Text-to-Speech - Simplified and reliable
-        try:
-            self.tts_engine = pyttsx3.init()
-            
-            # Set TTS properties
-            self.tts_engine.setProperty('rate', 180)
-            self.tts_engine.setProperty('volume', 0.9)
-            
-            # Get and set voice
-            voices = self.tts_engine.getProperty('voices')
-            if voices:
-                self.tts_engine.setProperty('voice', voices[0].id)
-                print(f"TTS voice set to: {voices[0].name}")
-            
-            self.tts_available = True
-            print("TTS initialized successfully")
-            
-            # Test TTS immediately
-            def test_tts():
-                try:
-                    self.tts_engine.say("TTS ready")
-                    self.tts_engine.runAndWait()
-                    print("TTS test successful")
-                except Exception as e:
-                    print(f"TTS test failed: {e}")
-            
-            # Run test in background
-            threading.Thread(target=test_tts, daemon=True).start()
-            
-        except Exception as e:
-            print(f"TTS initialization failed: {e}")
-            self.tts_available = False
-        
-        # Setup UI
+        self.frame_version = 0
+        self._last_shown_version = -1
+        self._container_size = (640, 360)
+        self._render_size = (640, 360)
+        self._frame_counter = 0
+        self._last_live_sign = ""
+        self._last_live_conf = 0.0
+        self._last_label_update_ms = 0
+        self.state_lock = threading.Lock()
+        self.gemini_timer = None
+        self.live_sign = ""
+        self.live_confidence = 0.0
+
+        self.tts_lock = threading.Lock()
+        self.tts_voice_id = None
+        self.tts_rate = 180
+        self.tts_volume = 0.9
+        self.tts_available = self._init_tts_preferences()
+
         self.setup_ui()
-        
-        # Load model
         self.load_model()
-        
-        # Start camera immediately
         self.root.after(100, self.start_camera)
-        
-        # Start UI update loop
+        self.root.after(500, self._refresh_display_size)
         self.update_frame()
-        
+
     def setup_ui(self):
-        # Title
-        title_frame = tk.Frame(self.root, bg='#2d2d2d', height=80)
-        title_frame.pack(fill=tk.X, padx=10, pady=10)
-        title_frame.pack_propagate(False)
-        
-        tk.Label(title_frame, text="🤟 Filipino Sign Language Translator", 
-                font=('Arial', 24, 'bold'), bg='#2d2d2d', fg='#ffffff').pack(pady=20)
-        
-        # Main content area
-        content_frame = tk.Frame(self.root, bg='#1e1e1e')
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Left side - Video feed
-        left_frame = tk.Frame(content_frame, bg='#2d2d2d', width=900)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
-        tk.Label(left_frame, text="Camera Feed", font=('Arial', 14, 'bold'), 
-                bg='#2d2d2d', fg='#ffffff').pack(pady=10)
-        
-        self.video_label = tk.Label(left_frame, bg='#000000')
-        self.video_label.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Right side - Controls and output
-        right_frame = tk.Frame(content_frame, bg='#2d2d2d', width=450)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(5, 0))
-        right_frame.pack_propagate(False)
-        
-        # Status
-        status_frame = tk.LabelFrame(right_frame, text="Status", 
-                                    font=('Arial', 12, 'bold'), bg='#2d2d2d', fg='#ffffff')
-        status_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        self.status_label = tk.Label(status_frame, text="Ready", 
-                                     font=('Arial', 11), bg='#2d2d2d', fg='#00ff00')
-        self.status_label.pack(pady=10)
-        
-        # Detected Signs
-        signs_frame = tk.LabelFrame(right_frame, text="Detected Signs", 
-                                   font=('Arial', 12, 'bold'), bg='#2d2d2d', fg='#ffffff')
-        signs_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        self.signs_text = tk.Text(signs_frame, height=8, font=('Arial', 11), 
-                                 bg='#3d3d3d', fg='#ffffff', wrap=tk.WORD,
-                                 insertbackground='#ffffff')
-        self.signs_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Translation Output
-        output_frame = tk.LabelFrame(right_frame, text="Translation", 
-                                    font=('Arial', 12, 'bold'), bg='#2d2d2d', fg='#ffffff')
-        output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        self.output_text = tk.Text(output_frame, height=6, font=('Arial', 12, 'bold'), 
-                                   bg='#3d3d3d', fg='#00ff00', wrap=tk.WORD,
-                                   insertbackground='#ffffff')
-        self.output_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Control buttons
-        button_frame = tk.Frame(right_frame, bg='#2d2d2d')
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        self.start_button = tk.Button(button_frame, text="▶ Start Collecting Signs", 
-                                      command=self.toggle_collection,
-                                      bg='#00aa00', fg='#ffffff', 
-                                      font=('Arial', 14, 'bold'),
-                                      height=2, cursor='hand2')
-        self.start_button.pack(fill=tk.X, pady=5)
-        
-        # TTS toggle
-        self.tts_enabled = tk.BooleanVar(value=True)
-        tts_check = tk.Checkbutton(button_frame, text="🔊 Read translation aloud", 
-                                   variable=self.tts_enabled,
-                                   bg='#2d2d2d', fg='#ffffff', 
-                                   selectcolor='#3d3d3d',
-                                   font=('Arial', 10),
-                                   activebackground='#2d2d2d',
-                                   activeforeground='#ffffff')
-        tts_check.pack(pady=5)
-        
-        tk.Button(button_frame, text="🗑️ Clear All", command=self.clear_all,
-                 bg='#aa0000', fg='#ffffff', font=('Arial', 12, 'bold'),
-                 height=1, cursor='hand2').pack(fill=tk.X, pady=5)
-        
-        # Sensitivity controls
-        sensitivity_frame = tk.LabelFrame(right_frame, text="Sensitivity Controls", 
-                                         font=('Arial', 10, 'bold'), bg='#2d2d2d', fg='#ffffff')
-        sensitivity_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Confidence threshold slider
-        tk.Label(sensitivity_frame, text="Detection Sensitivity", 
-                font=('Arial', 9), bg='#2d2d2d', fg='#ffffff').pack(pady=2)
-        
-        self.confidence_var = tk.DoubleVar(value=CONFIDENCE_THRESHOLD)
-        self.confidence_scale = tk.Scale(sensitivity_frame, from_=0.2, to=0.8, 
-                                        resolution=0.05, orient=tk.HORIZONTAL,
-                                        variable=self.confidence_var,
-                                        bg='#3d3d3d', fg='#ffffff',
-                                        highlightbackground='#2d2d2d',
-                                        command=self.update_sensitivity)
-        self.confidence_scale.pack(fill=tk.X, padx=10, pady=2)
-        
-        # Current sensitivity display
-        self.sensitivity_label = tk.Label(sensitivity_frame, 
-                                         text=f"Current: {CONFIDENCE_THRESHOLD:.2f} (Higher = Less Sensitive)", 
-                                         font=('Arial', 8), bg='#2d2d2d', fg='#ffaa00')
-        self.sensitivity_label.pack(pady=2)
-        
+        self.camera_frame = tk.Frame(self.root, bg="#000000")
+        self.camera_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(16, 8))
+
+        self.video_label = tk.Label(self.camera_frame, bg="#000000", bd=0)
+        self.video_label.pack(expand=True)
+
+        self.bottom_bar = tk.Frame(self.root, bg=BAR_BG, height=88)
+        self.bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        self.bottom_bar.pack_propagate(False)
+
+        self.bottom_bar.grid_columnconfigure(0, weight=1, minsize=160)
+        self.bottom_bar.grid_columnconfigure(1, weight=4, minsize=280)
+        self.bottom_bar.grid_columnconfigure(2, weight=1, minsize=220)
+
+        # Left — predicted label
+        label_panel = tk.Frame(self.bottom_bar, bg=BAR_BG)
+        label_panel.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=10)
+        tk.Label(label_panel, text="Sign", font=("Segoe UI", 9), bg=BAR_BG, fg=MUTED).pack(anchor="w")
+        self.label_display = tk.Label(
+            label_panel, text="—", font=("Segoe UI", 16, "bold"),
+            bg=BAR_BG, fg=ACCENT, wraplength=140, justify=tk.LEFT,
+        )
+        self.label_display.pack(anchor="w", fill=tk.X)
+
+        # Middle — transcript (widest)
+        transcript_panel = tk.Frame(self.bottom_bar, bg=BAR_BG)
+        transcript_panel.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
+        tk.Label(transcript_panel, text="Translation", font=("Segoe UI", 9), bg=BAR_BG, fg=MUTED).pack(anchor="w")
+        self.transcript_display = tk.Label(
+            transcript_panel, text="Start translating to begin…",
+            font=("Segoe UI", 14), bg=BAR_BG, fg=TRANSCRIPT_FG,
+            wraplength=520, justify=tk.LEFT, anchor="w",
+        )
+        self.transcript_display.pack(anchor="w", fill=tk.BOTH, expand=True)
+
+        # Right — buttons
+        btn_panel = tk.Frame(self.bottom_bar, bg=BAR_BG)
+        btn_panel.grid(row=0, column=2, sticky="nsew", padx=(6, 12), pady=10)
+
+        btn_style = dict(
+            font=("Segoe UI", 10), bd=0, padx=10, pady=8,
+            cursor="hand2", relief=tk.FLAT,
+        )
+
+        self.translate_btn = tk.Button(
+            btn_panel, text="Start translating",
+            command=self.toggle_translating,
+            bg="#2d6a4f", fg=TEXT, activebackground="#40916c", activeforeground=TEXT,
+            **btn_style,
+        )
+        self.translate_btn.pack(fill=tk.X, pady=(0, 4))
+
+        self.record_btn = tk.Button(
+            btn_panel, text="Record video",
+            command=self.toggle_video_recording,
+            bg="#3d3d3d", fg=TEXT, activebackground="#555555", activeforeground=TEXT,
+            **btn_style,
+        )
+        self.record_btn.pack(fill=tk.X, pady=4)
+
+        self.bones_btn = tk.Button(
+            btn_panel, text="Turn off bones",
+            command=self.toggle_bones,
+            bg="#3d3d3d", fg=TEXT, activebackground="#555555", activeforeground=TEXT,
+            **btn_style,
+        )
+        self.bones_btn.pack(fill=tk.X, pady=(4, 0))
+
     def load_model(self):
         try:
-            self.status_label.config(text="Loading model...", fg='#ffaa00')
-            self.root.update()
-            
-            # Load actions
-            self.actions = np.load('models/action_labels.npy', allow_pickle=True)
-            
-            # Build model
-            self.model = Sequential()
-            self.model.add(Conv1D(64, kernel_size=3, activation='relu', input_shape=(30, 258)))
-            self.model.add(Dropout(0.3))
-            self.model.add(LSTM(64, return_sequences=True, kernel_regularizer=l2(0.001)))
-            self.model.add(Dropout(0.5))
-            self.model.add(LSTM(128, return_sequences=False, kernel_regularizer=l2(0.001)))
-            self.model.add(Dropout(0.5))
-            self.model.add(Dense(64, activation='relu', kernel_regularizer=l2(0.001)))
-            self.model.add(Dropout(0.3))
-            self.model.add(Dense(self.actions.shape[0], activation='softmax'))
-            self.model.compile(optimizer='Adam', loss='categorical_crossentropy', 
-                             metrics=['categorical_accuracy'])
-            
-            # Load weights
-            self.model.load_weights('models/fsl_105_model.h5')
-            
-            self.status_label.config(text=f"Model loaded ({len(self.actions)} signs)", fg='#00ff00')
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load model:\n{e}")
-            self.status_label.config(text="Model load failed", fg='#ff0000')
-    
+            if not LABELS_PATH.exists():
+                raise FileNotFoundError(f"Labels not found: {LABELS_PATH}")
+            if not SCALER_PATH.exists():
+                raise FileNotFoundError(f"Scaler not found: {SCALER_PATH}")
+
+            self.actions = np.load(LABELS_PATH, allow_pickle=True)
+            self.model = load_fsl_model(len(self.actions))
+            self.scaler = joblib.load(SCALER_PATH)
+            n_features = getattr(self.scaler, "n_features_in_", None)
+            if n_features is not None and n_features != KEYPOINT_DIM:
+                raise ValueError(f"Scaler expects {n_features} features, app uses {KEYPOINT_DIM}")
+            print(f"Loaded {len(self.actions)}-sign LSTM from {FSL_15_DIR.name}")
+            self._warmup_model()
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to load model:\n{exc}")
+
+    def _warmup_model(self):
+        if self.model is None or self.scaler is None:
+            return
+        dummy_seq = np.zeros((SEQUENCE_LENGTH, KEYPOINT_DIM), dtype=np.float32)
+        self._classify_sequence(dummy_seq)
+        print("Model warmup complete")
+
+    def _refresh_display_size(self):
+        try:
+            cw = max(self.camera_frame.winfo_width(), 640)
+            ch = max(self.camera_frame.winfo_height(), 360)
+            self._container_size = (cw, ch)
+            self._render_size = fit_aspect_size(cw, ch)
+        except tk.TclError:
+            pass
+        self.root.after(500, self._refresh_display_size)
+
+    def _open_camera(self):
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        return cap
+
+    def _read_latest_frame(self):
+        if not self.cap or not self.cap.isOpened():
+            return False, None
+        for _ in range(DROP_STALE_CAMERA_FRAMES):
+            if not self.cap.grab():
+                break
+        return self.cap.retrieve()
+
     def start_camera(self):
-        """Start camera and video processing (always on)"""
         if self.video_running:
             return
-            
         try:
-            self.cap = cv2.VideoCapture(0)
+            self.cap = self._open_camera()
             if not self.cap.isOpened():
-                raise Exception("Could not open camera")
-                
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            
-            # Test read
-            ret, frame = self.cap.read()
+                raise RuntimeError("Could not open camera")
+            ret, _ = self._read_latest_frame()
             if not ret:
-                raise Exception("Could not read from camera")
-            
-            # Initialize MediaPipe with higher sensitivity
-            self.holistic = self.mp_holistic.Holistic(
-                min_detection_confidence=0.3,  # Lowered from 0.5 for better detection
-                min_tracking_confidence=0.3    # Lowered from 0.5 for better tracking
-            )
-            
+                raise RuntimeError("Could not read from camera")
+
+            self.tracker = HolisticTracker(process_width=TRACKER_PROCESS_WIDTH)
             self.video_running = True
-            self.status_label.config(text="Camera active - Ready", fg='#00ff00')
-            print("Camera started successfully")
-            
-            # Start video thread
-            self.video_thread = threading.Thread(target=self.process_video, daemon=True)
-            self.video_thread.start()
-        except Exception as e:
-            messagebox.showerror("Camera Error", f"Failed to start camera:\n{e}")
-            self.status_label.config(text="Camera error", fg='#ff0000')
-            print(f"Camera error: {e}")
-    
-    def toggle_collection(self):
-        """Toggle sign collection for translation"""
-        if not self.is_collecting:
-            self.start_collection()
+            threading.Thread(target=self.process_video, daemon=True).start()
+        except Exception as exc:
+            messagebox.showerror("Camera Error", str(exc))
+
+    def toggle_translating(self):
+        if not self.is_translating:
+            self.is_translating = True
+            self.detected_signs = []
+            self.transcript = ""
+            self.last_spoken = ""
+            self.sign_detector.reset()
+            self.sequence.clear()
+            self.live_sign = ""
+            self.live_confidence = 0.0
+            self.translate_btn.config(text="Stop translating", bg="#9b2226")
+            self._update_transcript_display("Sign now — translation updates live")
+            self.label_display.config(text="—")
         else:
-            self.stop_collection()
-    
-    def start_collection(self):
-        """Start collecting signs for translation"""
-        self.is_collecting = True
-        self.start_button.config(text="⏹ Stop & Translate", bg='#aa0000')
-        self.status_label.config(text="Collecting signs...", fg='#ffaa00')
-        self.detected_signs = []  # Clear previous signs
-        self.update_signs_display()
-    
-    def stop_collection(self):
-        """Stop collecting and generate translation"""
-        self.is_collecting = False
-        self.start_button.config(text="▶ Start Collecting Signs", bg='#00aa00')
-        self.status_label.config(text="Building sentence...", fg='#ffaa00')
-        
-        # Refresh TTS engine before speaking to ensure it works
-        if self.tts_available:
-            self.refresh_tts_engine()
-        
-        # Generate final translation using SentenceBuilder
-        if self.detected_signs:
-            translation = self.sentence_builder.build_sentence(self.detected_signs)
-            self.output_text.delete(1.0, tk.END)
-            self.output_text.insert(1.0, translation)
-            self.status_label.config(text="Translation complete", fg='#00ff00')
-            
-            # Read translation aloud
-            if self.tts_enabled.get() and self.tts_available:
-                self.speak_text(translation)
+            self.is_translating = False
+            self.translate_btn.config(text="Start translating", bg="#2d6a4f")
+
+    def toggle_bones(self):
+        self.show_bones = not self.show_bones
+        self.bones_btn.config(text="Turn on bones" if not self.show_bones else "Turn off bones")
+
+    def toggle_video_recording(self):
+        if not self.is_recording_video:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".mp4",
+                filetypes=[("MP4 video", "*.mp4")],
+                initialfile=f"fsl_recording_{datetime.now():%Y%m%d_%H%M%S}.mp4",
+            )
+            if not path:
+                return
+            self.record_path = path
+            self.is_recording_video = True
+            self.record_btn.config(text="Stop recording", bg="#9b2226")
         else:
-            self.status_label.config(text="No signs detected", fg='#ff0000')
-    
-    def speak_text(self, text):
-        """Speak text using TTS - simplified and reliable"""
-        if not self.tts_available or not text.strip():
-            print("TTS not available or empty text")
+            self.is_recording_video = False
+            if self.video_writer:
+                self.video_writer.release()
+                self.video_writer = None
+            self.record_btn.config(text="Record video", bg="#3d3d3d")
+            if self.record_path:
+                messagebox.showinfo("Saved", f"Video saved to:\n{self.record_path}")
+                self.record_path = None
+
+    def _classify_sequence(self, sequence):
+        if self.model is None or self.scaler is None or len(sequence) < SEQUENCE_LENGTH:
+            return None, 0.0
+        if isinstance(sequence, deque):
+            window = np.array(sequence, dtype=np.float32)
+        else:
+            window = np.asarray(sequence[-SEQUENCE_LENGTH:], dtype=np.float32)
+        model_input = prepare_model_input(window, self.scaler)
+        res = self.model(model_input, training=False).numpy()[0]
+        best = int(np.argmax(res))
+        return str(self.actions[best]), float(res[best])
+
+    def _on_sign_recorded(self, sign, confidence):
+        with self.state_lock:
+            if not append_sign_no_spam(self.detected_signs, sign):
+                return
+            signs_copy = list(self.detected_signs)
+
+        display = sign.replace("_", " ")
+        interim = SemanticInterpreter._fallback(signs_copy)
+        self.root.after(0, lambda: self.label_display.config(text=f"{display} ({confidence:.0%})"))
+        self.root.after(0, lambda: self._update_transcript_display(interim))
+        print(f"Recorded: {sign} ({confidence:.0%}) → {interim}")
+        self._schedule_semantic_update()
+
+    def _schedule_semantic_update(self):
+        if self.gemini_timer:
+            self.root.after_cancel(self.gemini_timer)
+        self.gemini_timer = self.root.after(int(GEMINI_DEBOUNCE_SEC * 1000), self._run_semantic_update)
+
+    def _run_semantic_update(self):
+        with self.state_lock:
+            signs = list(self.detected_signs)
+        if not signs:
             return
-        
-        # Immediate feedback
-        print(f"Speaking: {text}")
-            
-        def speak():
-            try:
-                # Simple, reliable TTS approach
-                self.tts_engine.say(text)
-                self.tts_engine.runAndWait()
-                print("TTS completed successfully")
-                
-            except Exception as e:
-                print(f"Primary TTS error: {e}")
-                # Simple backup - create fresh engine
-                try:
-                    backup_engine = pyttsx3.init()
-                    backup_engine.setProperty('rate', 180)
-                    backup_engine.setProperty('volume', 0.9)
-                    backup_engine.say(text)
-                    backup_engine.runAndWait()
-                    backup_engine.stop()
-                    print("Backup TTS completed")
-                except Exception as e2:
-                    print(f"Backup TTS also failed: {e2}")
-        
-        # Run in thread to avoid blocking UI
-        tts_thread = threading.Thread(target=speak, daemon=True)
-        tts_thread.start()
-    
-    def refresh_tts_engine(self):
-        """Refresh TTS engine to ensure it works reliably"""
-        try:
-            # Stop any pending speech
-            if hasattr(self, 'tts_engine') and self.tts_engine:
-                try:
-                    self.tts_engine.stop()
-                except:
-                    pass
-            
-            # Reinitialize the engine with consistent settings
-            self.tts_engine = pyttsx3.init()
-            self.tts_engine.setProperty('rate', 180)
-            self.tts_engine.setProperty('volume', 0.9)
-            
-            voices = self.tts_engine.getProperty('voices')
-            if voices:
-                self.tts_engine.setProperty('voice', voices[0].id)
-            
-            print("TTS engine refreshed successfully")
-            return True
-        except Exception as e:
-            print(f"Failed to refresh TTS engine: {e}")
-            return False
-    
-    def update_sensitivity(self, value):
-        """Update detection sensitivity in real-time"""
-        global CONFIDENCE_THRESHOLD
-        CONFIDENCE_THRESHOLD = float(value)
-        
-        # Update the stabilizer with new threshold
-        self.stabilizer = SignStabilizer()
-        
-        # Update display
-        self.sensitivity_label.config(text=f"Current: {CONFIDENCE_THRESHOLD:.2f} (Higher = Less Sensitive)")
-        
-        print(f"Sensitivity updated: {CONFIDENCE_THRESHOLD:.2f}")
-        
-        # Show feedback in status
-        self.status_label.config(text=f"Sensitivity: {CONFIDENCE_THRESHOLD:.2f}", fg='#ffaa00')
-        self.root.after(2000, lambda: self.status_label.config(text="Ready", fg='#00ff00'))
-    
+
+        def worker():
+            text = self.semantic.interpret(signs)
+            self.root.after(0, lambda: self._apply_transcript(text))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_transcript(self, text):
+        if not text:
+            return
+        self.transcript = text
+        self._update_transcript_display(text)
+        if text != self.last_spoken and self.tts_available:
+            self.last_spoken = text
+            self.speak_text(text)
+
+    def _update_transcript_display(self, text):
+        self.transcript_display.config(text=text or "…")
+
     def process_video(self):
-        """Process video frames continuously (simplified approach)"""
-        print("Video processing thread started")
         while self.video_running and self.cap and self.cap.isOpened():
-            ret, frame = self.cap.read()
+            ret, frame = self._read_latest_frame()
             if not ret:
-                print("Failed to read frame")
                 break
-            
-            # Process frame with MediaPipe
-            image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image.flags.writeable = False
-            results = self.holistic.process(image)
-            image.flags.writeable = True
-            
-            # Draw landmarks
-            if results.pose_landmarks:
-                self.mp_drawing.draw_landmarks(
-                    image, results.pose_landmarks, self.mp_holistic.POSE_CONNECTIONS,
-                    self.mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
-                    self.mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
+
+            frame = crop_to_aspect_ratio(frame)
+            output = self.tracker.process(frame)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if self.show_bones:
+                self.tracker.draw_landmarks(rgb, output, inplace=True)
+
+            if output.keypoints is not None:
+                self.sequence.append(output.keypoints)
+
+            self._frame_counter += 1
+            run_inference = (
+                self._frame_counter % INFERENCE_EVERY_N_FRAMES == 0
+                or len(self.sequence) == SEQUENCE_LENGTH
+            )
+            if run_inference:
+                sign, confidence = self._classify_sequence(self.sequence)
+                self.live_sign = sign or ""
+                self.live_confidence = confidence
+            else:
+                sign, confidence = self.live_sign, self.live_confidence
+
+            if self.is_translating and len(self.sequence) == SEQUENCE_LENGTH:
+                now_ms = int(time.monotonic() * 1000)
+                sign_changed = sign != self._last_live_sign
+                conf_changed = abs(confidence - self._last_live_conf) >= 0.05
+                label_due = (now_ms - self._last_label_update_ms) >= UI_LABEL_MIN_INTERVAL_MS
+
+                if sign_changed or conf_changed or label_due:
+                    self._last_live_sign = sign or ""
+                    self._last_live_conf = confidence
+                    self._last_label_update_ms = now_ms
+                    live_text = (
+                        f"{sign.replace('_', ' ')} ({confidence:.0%})"
+                        if sign else "—"
+                    )
+                    self.root.after(0, lambda t=live_text: self.label_display.config(text=t))
+
+                recorded = self.sign_detector.update(
+                    sign, confidence, self.confidence_threshold
                 )
-            if results.left_hand_landmarks:
-                self.mp_drawing.draw_landmarks(
-                    image, results.left_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS,
-                    self.mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
-                    self.mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
-                )
-            if results.right_hand_landmarks:
-                self.mp_drawing.draw_landmarks(
-                    image, results.right_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS,
-                    self.mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=4),
-                    self.mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
-                )
-            
-            # Extract keypoints and make prediction
-            keypoints = self.extract_keypoints(results)
-            self.sequence.append(keypoints)
-            self.sequence = self.sequence[-SEQUENCE_LENGTH:]
-            
-            # Make prediction when we have enough frames
-            if len(self.sequence) == SEQUENCE_LENGTH:
-                res = self.model.predict(np.expand_dims(self.sequence, axis=0), verbose=0)[0]
-                predicted_idx = np.argmax(res)
-                confidence = res[predicted_idx]
-                
-                # Check stability
-                stable_idx, stable_conf, is_stable = self.stabilizer.add_prediction(predicted_idx, confidence)
-                
-                # Only add to detected_signs if we're collecting
-                if is_stable and self.is_collecting:
-                    sign = self.actions[stable_idx]
-                    if len(self.detected_signs) == 0 or self.detected_signs[-1] != sign:
-                        self.detected_signs.append(sign)
-                        self.root.after(0, self.update_signs_display)
-                        self.stabilizer.reset()
-                elif is_stable and not self.is_collecting:
-                    self.stabilizer.reset()
-            
-            # Store frame for display (thread-safe)
+                if recorded:
+                    self._on_sign_recorded(recorded, confidence)
+
+            if self.is_recording_video:
+                self._write_video_frame(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+
+            cw, ch = self._container_size
+            display_rgb = letterbox_frame(rgb, cw, ch)
             with self.frame_lock:
-                self.current_frame = image.copy()
-        
-        print("Video processing thread ended")
-    
+                self.current_frame = display_rgb
+                self.frame_version += 1
+
+    def _write_video_frame(self, bgr_frame):
+        h, w = bgr_frame.shape[:2]
+        if self.video_writer is None:
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.video_writer = cv2.VideoWriter(self.record_path, fourcc, 20.0, (w, h))
+        self.video_writer.write(bgr_frame)
+
     def update_frame(self):
-        """Update video frame display (runs in main thread)"""
         try:
             with self.frame_lock:
-                if self.current_frame is not None:
-                    # Resize for display
-                    image = cv2.resize(self.current_frame, (860, 640))
-                    img = Image.fromarray(image)
-                    imgtk = ImageTk.PhotoImage(image=img)
-                    self.video_label.imgtk = imgtk
-                    self.video_label.configure(image=imgtk)
-        except Exception as e:
-            print(f"Frame update error: {e}")
-        
-        # Schedule next update
-        self.root.after(30, self.update_frame)  # ~33 FPS
-    
-    def extract_keypoints(self, results):
-        pose = np.array([[res.x, res.y, res.z, res.visibility] 
-                        for res in results.pose_landmarks.landmark]).flatten() \
-               if results.pose_landmarks else np.zeros(33*4)
-        lh = np.array([[res.x, res.y, res.z] 
-                      for res in results.left_hand_landmarks.landmark]).flatten() \
-             if results.left_hand_landmarks else np.zeros(21*3)
-        rh = np.array([[res.x, res.y, res.z] 
-                      for res in results.right_hand_landmarks.landmark]).flatten() \
-             if results.right_hand_landmarks else np.zeros(21*3)
-        return np.concatenate([pose, lh, rh])
-    
-    def update_signs_display(self):
-        signs_display = " → ".join([s.replace('_', ' ') for s in self.detected_signs])
-        self.signs_text.delete(1.0, tk.END)
-        self.signs_text.insert(1.0, signs_display)
-    
-    def clear_all(self):
-        self.detected_signs = []
-        self.sequence = []
-        self.stabilizer.reset()
-        self.signs_text.delete(1.0, tk.END)
-        self.output_text.delete(1.0, tk.END)
-        if self.is_collecting:
-            self.status_label.config(text="Cleared - Still collecting", fg='#ffaa00')
-        else:
-            self.status_label.config(text="Cleared - Ready", fg='#00ff00')
-    
+                if self.current_frame is None or self.frame_version == self._last_shown_version:
+                    self.root.after(DISPLAY_INTERVAL_MS, self.update_frame)
+                    return
+                frame = self.current_frame
+                self._last_shown_version = self.frame_version
+
+            imgtk = ImageTk.PhotoImage(Image.fromarray(frame))
+            self.video_label.imgtk = imgtk
+            self.video_label.configure(image=imgtk)
+        except Exception as exc:
+            print(f"Frame update error: {exc}")
+        self.root.after(DISPLAY_INTERVAL_MS, self.update_frame)
+
+    def _init_tts_preferences(self):
+        engine = None
+        try:
+            engine = pyttsx3.init()
+            engine.setProperty("rate", self.tts_rate)
+            engine.setProperty("volume", self.tts_volume)
+            voices = engine.getProperty("voices")
+            if voices:
+                self.tts_voice_id = voices[0].id
+            return True
+        except Exception as exc:
+            print(f"TTS init failed: {exc}")
+            return False
+        finally:
+            if engine:
+                try:
+                    engine.stop()
+                except Exception:
+                    pass
+
+    def speak_text(self, text):
+        if not self.tts_available or not text.strip():
+            return
+
+        def worker():
+            with self.tts_lock:
+                com_init = False
+                try:
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                    com_init = True
+                except ImportError:
+                    pass
+                engine = None
+                try:
+                    engine = pyttsx3.init()
+                    engine.setProperty("rate", self.tts_rate)
+                    engine.setProperty("volume", self.tts_volume)
+                    if self.tts_voice_id:
+                        engine.setProperty("voice", self.tts_voice_id)
+                    engine.say(text.strip())
+                    engine.runAndWait()
+                except Exception as exc:
+                    print(f"TTS error: {exc}")
+                finally:
+                    if engine:
+                        try:
+                            engine.stop()
+                        except Exception:
+                            pass
+                    if com_init:
+                        try:
+                            import pythoncom
+                            pythoncom.CoUninitialize()
+                        except Exception:
+                            pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def on_closing(self):
         self.video_running = False
+        if self.video_writer:
+            self.video_writer.release()
         if self.cap:
             self.cap.release()
-        if self.holistic:
-            self.holistic.close()
+        if self.tracker:
+            self.tracker.close()
         self.root.destroy()
 
-# ==========================================
-# MAIN
-# ==========================================
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = FSLTranslatorApp(root)

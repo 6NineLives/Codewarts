@@ -1,8 +1,8 @@
 @echo off
 echo ========================================
-echo Filipino Sign Language Translator V2
-echo Using Model: fsl_105_model_2.h5
+echo Filipino Sign Language Translator
+echo Using Model: fsl_11_model.h5 (11 signs)
 echo ========================================
 echo.
-python fsl_translator_app_v2.py
+python fsl_translator_app.py
 pause
