@@ -1,12 +1,32 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TAB_CONFIG = [
-  { name: 'translate', label: 'Translate', icon: 'hand-peace' as const },
-  { name: 'create', label: 'Create', icon: 'plus-circle-outline' as const },
-  { name: 'discover', label: 'Discover', icon: 'compass-outline' as const },
+  {
+    name: 'translate',
+    label: 'Translate',
+    icon: 'hand-peace' as const,
+    activeIcon: 'hand-peace' as const,
+  },
+  {
+    name: 'create',
+    label: 'Create',
+    icon: 'plus-circle-outline' as const,
+    activeIcon: 'plus-circle' as const,
+  },
+  {
+    name: 'discover',
+    label: 'Discover',
+    icon: 'compass-outline' as const,
+    activeIcon: 'compass' as const,
+  },
 ] as const;
+
+const CREAM = '#FAF1EA';
+const SAGE_GREEN = '#A6B385';
+
+const ICON_RING_SIZE = 50;
 
 export type TanawTabBarProps = {
   state: {
@@ -26,17 +46,15 @@ export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
 
   return (
     <View
-      className="bg-forestGreen rounded-t-[30px] px-6 pt-3 absolute bottom-0 left-0 right-0 z-50"
-      style={{
-        paddingBottom: Math.max(insets.bottom, 12),
-      }}
+      className="bg-forestGreen rounded-t-[30px] px-5 pt-3 absolute bottom-0 left-0 right-0 z-50"
+      style={{ paddingBottom: Math.max(insets.bottom, 12) }}
     >
-      <View className="flex-row items-center justify-between">
+      <View style={styles.tabRow}>
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
           const tab = TAB_CONFIG.find((t) => t.name === route.name);
           const label = tab?.label ?? route.name;
-          const iconName = tab?.icon ?? 'circle-outline';
+          const iconName = isFocused ? (tab?.activeIcon ?? tab?.icon) : (tab?.icon ?? 'circle-outline');
 
           const onPress = () => {
             const event = navigation.emit({
@@ -56,20 +74,23 @@ export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
               accessibilityLabel={label}
-              className="flex-1 items-center"
+              style={styles.tabPressable}
             >
-              <View
-                className={`items-center justify-center rounded-2xl px-5 py-1.5 ${
-                  isFocused ? 'bg-sageGreen' : 'bg-transparent'
-                }`}
-              >
-                <MaterialCommunityIcons
-                  name={iconName}
-                  size={28}
-                  color="#FAF1EA"
-                />
+              <View style={styles.iconSlot}>
+                {isFocused ? (
+                  <>
+                    <View style={styles.iconHalo} />
+                    <View style={styles.iconRing}>
+                      <MaterialCommunityIcons name={iconName} size={26} color={CREAM} />
+                    </View>
+                  </>
+                ) : (
+                  <MaterialCommunityIcons name={iconName} size={24} color="rgba(250, 241, 234, 0.55)" />
+                )}
               </View>
-              <Text className="text-cream font-jua text-xs mt-1">{label}</Text>
+              <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : styles.tabLabelInactive]}>
+                {label}
+              </Text>
             </Pressable>
           );
         })}
@@ -77,3 +98,55 @@ export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  tabPressable: {
+    flex: 1,
+    alignItems: 'center',
+    paddingBottom: 2,
+  },
+  iconSlot: {
+    width: ICON_RING_SIZE,
+    height: ICON_RING_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  iconHalo: {
+    position: 'absolute',
+    width: ICON_RING_SIZE,
+    height: ICON_RING_SIZE,
+    borderRadius: ICON_RING_SIZE / 2,
+    backgroundColor: 'rgba(250, 241, 234, 0.14)',
+  },
+  iconRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: SAGE_GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  tabLabel: {
+    fontFamily: 'Jua_400Regular',
+    fontSize: 11,
+    letterSpacing: 0.2,
+  },
+  tabLabelActive: {
+    color: CREAM,
+    opacity: 1,
+  },
+  tabLabelInactive: {
+    color: CREAM,
+    opacity: 0.5,
+  },
+});

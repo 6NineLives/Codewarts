@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { RemoteMedia } from '@/components/media/remote-media';
 import type { Contribution } from '@/contracts/contribution';
 
 type ContributionCardProps = {
@@ -42,12 +43,15 @@ export function ImmersiveVideoSlide({ item }: { item: Contribution }) {
   return (
     <View className="flex-1 bg-charcoal items-center justify-center">
       <View className="absolute inset-0 items-center justify-center bg-charcoal">
-        {item.thumbnailUrl ? (
-          <Image 
-            source={{ uri: item.thumbnailUrl }} 
-            className="w-full h-full"
+        {item.videoUrl ? (
+          <RemoteMedia
+            uri={item.videoUrl}
+            format="video"
+            style={StyleSheet.absoluteFill}
             resizeMode="cover"
           />
+        ) : item.thumbnailUrl ? (
+          <Image source={{ uri: item.thumbnailUrl }} className="w-full h-full" resizeMode="cover" />
         ) : (
           <Text className="text-6xl">🤟</Text>
         )}

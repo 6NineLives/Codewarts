@@ -1,0 +1,73 @@
+# TANAW mobile media manifest
+# Create and Discover use separate media pools — do not share URIs between sections.
+#
+# Imgur tips:
+#   - Page links (https://imgur.com/hjWXPHA) work if you set `format: video` or `format: image`.
+#   - Direct links are best: https://i.imgur.com/hjWXPHA.mp4 (video) or .jpg (poster)
+#   - Album links (imgur.com/a/...) are NOT supported — use a single post's i.imgur.com URL.
+#
+# After editing, run: npm run config:sync
+
+create:
+  defaults:
+    illustration:
+      type: remote
+      uri: https://imgur.com/df4U8Kp
+      format: video
+      width: 150
+      height: 150
+
+  # Create tab uses the matching signKey entry below (not defaults).
+  challenges:
+    - id: challenge-1
+      signKey: GOOD_AFTERNOON
+      illustration:
+        type: remote
+        uri: https://imgur.com/df4U8Kp
+        format: video
+        width: 150
+        height: 150
+
+discover:
+  defaults:
+    thumbnail:
+      type: remote
+      uri: https://i.imgur.com/hjWXPHA.jpg
+      format: image
+      width: 400
+      height: 800
+    video:
+      type: remote
+      uri: https://i.imgur.com/hjWXPHA.mp4
+      format: video
+
+  contributions:
+    - id: "1"
+      thumbnail:
+        type: remote
+        uri: https://i.imgur.com/hjWXPHA.jpg
+        format: image
+        width: 400
+        height: 800
+      video:
+        type: remote
+        uri: https://i.imgur.com/hjWXPHA.mp4
+        format: video
+    - id: "2"
+      thumbnail:
+        type: remote
+        uri: https://picsum.photos/seed/tanaw-discover-02/400/800
+        width: 400
+        height: 800
+    - id: "3"
+      thumbnail:
+        type: remote
+        uri: https://picsum.photos/seed/tanaw-discover-03/400/800
+        width: 400
+        height: 800
+    - id: "4"
+      thumbnail:
+        type: remote
+        uri: https://picsum.photos/seed/tanaw-discover-04/400/800
+        width: 400
+        height: 800

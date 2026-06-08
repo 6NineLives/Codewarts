@@ -46,16 +46,18 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "yaml": "^2.9.0"
   },
   "scripts": {
-    "start": "expo start --dev-client",
+    "start": "npm run config:sync && expo start --dev-client",
     "dev": "expo start --web",
     "android": "expo run:android",
     "android:dev": "expo run:android",
     "ios": "expo run:ios",
     "ios:dev": "expo run:ios",
     "prebuild": "expo prebuild",
+    "config:sync": "node ./scripts/sync-media-config.mjs",
     "web": "expo start --web"
   },
   "private": true

@@ -1,3 +1,4 @@
+import { getDiscoverContributionMedia, resolveRemoteMedia } from '@/config/media';
 import type { Contribution, ContributionCategory } from '@/contracts/contribution';
 
 export const DISCOVER_FILTERS: Array<{ id: ContributionCategory | 'all'; label: string }> = [
@@ -6,20 +7,41 @@ export const DISCOVER_FILTERS: Array<{ id: ContributionCategory | 'all'; label: 
   { id: 'greetings', label: 'Greetings' },
 ];
 
-const BASE_CONTRIBUTION: Omit<Contribution, 'id'> = {
+const BASE_CONTRIBUTION: Omit<Contribution, 'id' | 'thumbnailUrl' | 'videoUrl'> = {
   signKey: 'NICE_TO_MEET_YOU',
   signLabelTagalog: 'I Love You!',
   contributorName: 'Jodimeer Ammang',
   category: 'phrases',
   fslDefinition: 'FSL Sign: "I Love You"',
-  thumbnailUrl: 'https://picsum.photos/seed/tanaw/400/800',
 };
 
+function mediaUrlsForId(id: string) {
+  const media = getDiscoverContributionMedia(id);
+  const thumbnail = resolveRemoteMedia(media.thumbnail);
+  const video = resolveRemoteMedia(media.video);
+  return {
+    thumbnailUrl: thumbnail?.uri,
+    videoUrl: video?.uri,
+  };
+}
+
 export const DISCOVER_CONTRIBUTIONS: Contribution[] = [
-  { id: '1', ...BASE_CONTRIBUTION, thumbnailUrl: 'https://picsum.photos/seed/tanaw1/400/800' },
-  { id: '2', ...BASE_CONTRIBUTION, category: 'greetings', thumbnailUrl: 'https://picsum.photos/seed/tanaw2/400/800' },
-  { id: '3', ...BASE_CONTRIBUTION, signLabelTagalog: 'Salamat', signKey: 'THANK_YOU', thumbnailUrl: 'https://picsum.photos/seed/tanaw3/400/800' },
-  { id: '4', ...BASE_CONTRIBUTION, signLabelTagalog: 'Magandang hapon', signKey: 'GOOD_AFTERNOON', thumbnailUrl: 'https://picsum.photos/seed/tanaw4/400/800' },
+  { id: '1', ...BASE_CONTRIBUTION, ...mediaUrlsForId('1') },
+  { id: '2', ...BASE_CONTRIBUTION, category: 'greetings', ...mediaUrlsForId('2') },
+  {
+    id: '3',
+    ...BASE_CONTRIBUTION,
+    signLabelTagalog: 'Salamat',
+    signKey: 'THANK_YOU',
+    ...mediaUrlsForId('3'),
+  },
+  {
+    id: '4',
+    ...BASE_CONTRIBUTION,
+    signLabelTagalog: 'Magandang hapon',
+    signKey: 'GOOD_AFTERNOON',
+    ...mediaUrlsForId('4'),
+  },
 ];
 
 /** Immersive feed — 3 vertical videos for Phase 1 swipe mock. */

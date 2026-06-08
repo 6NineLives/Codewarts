@@ -1,5 +1,5 @@
 import { memo, useRef, type RefObject } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 
 import type { BonesCameraRef } from '@/components/camera/bones-camera-types';
 import { CameraPlaceholder } from '@/components/camera/camera-placeholder';
@@ -18,7 +18,6 @@ const CONTROLS_BOTTOM = 112;
 type TranslateControlsProps = {
   isTranslating: boolean;
   transcript: string;
-  hasLandmarks: boolean;
   onToggleTranslating: () => void;
   onToggleCamera: () => void;
 };
@@ -26,32 +25,23 @@ type TranslateControlsProps = {
 const TranslateControls = memo(function TranslateControls({
   isTranslating,
   transcript,
-  hasLandmarks,
   onToggleTranslating,
   onToggleCamera,
 }: TranslateControlsProps) {
   return (
-    <>
-      <View className="absolute right-4 z-20 bg-charcoal/70 rounded-full px-3 py-1" style={{ top: 88 }}>
-        <Text className="text-cream text-xs font-jua">
-          {hasLandmarks ? 'Bones: tracking' : 'Bones: no landmarks'}
-        </Text>
+    <View
+      className="absolute left-0 right-0 z-20"
+      style={{ bottom: CONTROLS_BOTTOM }}
+    >
+      <TranslationCard transcript={transcript} isTranslating={isTranslating} />
+      <View className="mt-4">
+        <TranslateActionRow
+          isTranslating={isTranslating}
+          onToggleTranslating={onToggleTranslating}
+          onToggleCamera={onToggleCamera}
+        />
       </View>
-
-      <View
-        className="absolute left-0 right-0 z-20"
-        style={{ bottom: CONTROLS_BOTTOM }}
-      >
-        <TranslationCard transcript={transcript} isTranslating={isTranslating} />
-        <View className="mt-4">
-          <TranslateActionRow
-            isTranslating={isTranslating}
-            onToggleTranslating={onToggleTranslating}
-            onToggleCamera={onToggleCamera}
-          />
-        </View>
-      </View>
-    </>
+    </View>
   );
 });
 
@@ -86,7 +76,6 @@ export default function TranslateScreen() {
     isTranslating,
     transcript,
     landmarks,
-    hasLandmarks,
     toggleTranslating,
     onCameraReady,
     onCameraError,
@@ -110,7 +99,6 @@ export default function TranslateScreen() {
       <TranslateControls
         isTranslating={isTranslating}
         transcript={transcript}
-        hasLandmarks={hasLandmarks}
         onToggleTranslating={toggleTranslating}
         onToggleCamera={() => cameraRef.current?.toggleFacing()}
       />

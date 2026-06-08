@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Image, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
+import { RemoteMedia } from '@/components/media/remote-media';
 import type { SignChallenge } from '@/contracts/create';
 
 type ChallengeCardProps = {
@@ -19,11 +20,18 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
           <Text className="text-charcoal font-jua text-base">{challenge.meaningDisplay}</Text>
         </View>
         <View className="w-[75px] h-[75px] rounded-full border-2 border-forestGreen items-center justify-center bg-cream overflow-hidden">
-          <Image 
-            source={{ uri: 'https://picsum.photos/seed/tanaw/150/150' }} 
-            className="w-full h-full"
-            resizeMode="cover"
-          />
+          {challenge.illustrationUrl && challenge.illustrationFormat ? (
+            <RemoteMedia
+              uri={challenge.illustrationUrl}
+              format={challenge.illustrationFormat}
+              style={{ width: '100%', height: '100%' }}
+              imageStyle={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+              zoom={1.5}
+            />
+          ) : (
+            <Text className="text-3xl">{challenge.illustrationEmoji ?? '🤟'}</Text>
+          )}
         </View>
       </View>
     </View>
