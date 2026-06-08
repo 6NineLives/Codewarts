@@ -11,12 +11,31 @@ Expo Router + NativeWind mobile app for FSL → Tagalog translation.
 
 ## Run
 
+### Translate tab (real-time bones)
+
+The Translate tab uses **react-native-vision-camera** for continuous video frame sampling. This requires a **custom development build** — Expo Go is not supported for bone tracking.
+
 ```bash
+# Terminal 1 — API
+cd services/tanaw-api
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 — mobile dev client (first time builds native app)
 cd apps/tanaw-mobile
-npm start
+npm run android    # or: npm run ios
+npm start          # then open the dev client on device
 ```
 
-Scan the QR code with Expo Go, or press `w` for web.
+On Android, frames are sampled from the live preview via `takeSnapshot()` (~5–6 fps to the backend). On iOS, silent `capturePhotoToFile()` is used as a fallback.
+
+### Web / Create tab
+
+```bash
+cd apps/tanaw-mobile
+npm run web        # web preview (no bones camera)
+```
+
+Create still uses `expo-camera` for recording and works in Expo Go.
 
 ## Figma reference
 

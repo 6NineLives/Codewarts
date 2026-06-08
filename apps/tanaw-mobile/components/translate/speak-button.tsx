@@ -1,31 +1,30 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-type SpeakTranslationButtonProps = {
-  onPress: () => void;
-  isSpeaking?: boolean;
-  disabled?: boolean;
-};
-
-export function SpeakTranslationButton({
+export function TranslateToggleButton({
+  isTranslating,
   onPress,
-  isSpeaking = false,
-  disabled = false,
-}: SpeakTranslationButtonProps) {
+}: {
+  isTranslating: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled || isSpeaking}
-      className="flex-row items-center bg-speakGreen rounded-[33px] px-6 py-4 flex-1 mr-3"
+      className={`flex-row items-center rounded-[33px] px-6 py-4 flex-1 mr-3 ${
+        isTranslating ? 'bg-recordRed' : 'bg-speakGreen'
+      }`}
       accessibilityRole="button"
-      accessibilityLabel="Speak translation"
+      accessibilityLabel={isTranslating ? 'Stop translating' : 'Start translating'}
     >
-      {isSpeaking ? (
-        <ActivityIndicator color="#FAF1EA" size="small" />
-      ) : (
-        <MaterialCommunityIcons name="volume-high" size={22} color="#FAF1EA" />
-      )}
-      <Text className="text-cream font-jua text-lg ml-3">Speak Translation</Text>
+      <MaterialCommunityIcons
+        name={isTranslating ? 'stop-circle-outline' : 'play-circle-outline'}
+        size={22}
+        color="#FAF1EA"
+      />
+      <Text className="text-cream font-jua text-lg ml-3">
+        {isTranslating ? 'Stop translating' : 'Start translating'}
+      </Text>
     </Pressable>
   );
 }
@@ -44,17 +43,17 @@ export function CameraToggleButton({ onPress }: { onPress?: () => void }) {
 }
 
 export function TranslateActionRow({
-  onSpeak,
-  isSpeaking,
+  isTranslating,
+  onToggleTranslating,
   onToggleCamera,
 }: {
-  onSpeak: () => void;
-  isSpeaking?: boolean;
+  isTranslating: boolean;
+  onToggleTranslating: () => void;
   onToggleCamera?: () => void;
 }) {
   return (
     <View className="flex-row items-center px-7 mb-4">
-      <SpeakTranslationButton onPress={onSpeak} isSpeaking={isSpeaking} />
+      <TranslateToggleButton isTranslating={isTranslating} onPress={onToggleTranslating} />
       <CameraToggleButton onPress={onToggleCamera} />
     </View>
   );

@@ -74,6 +74,34 @@ class TagalogTTS:
                 if self._backend == "edge":
                     self._try_fallback_chain(spoken_text, skip="edge")
 
+    def synthesize_mp3(self, text: str) -> bytes | None:
+        """Return Tagalog speech as MP3 bytes (for mobile clients)."""
+        if not self._available or not text.strip():
+            return None
+
+        spoken_text = self._prepare_text_for_tts(text.strip())
+        with self._lock:
+            try:
+                if self._backend == "edge":
+                    path = self._run_async(self._edge_to_file(spoken_text))
+                    try:
+                        return Path(path).read_bytes()
+                    finally:
+                        Path(path).unlink(missing_ok=True)
+                if self._backend == "gtts":
+                    from gtts import gTTS
+
+                    fd, path = tempfile.mkstemp(suffix=".mp3")
+                    os.close(fd)
+                    try:
+                        gTTS(text=spoken_text, lang="tl").save(path)
+                        return Path(path).read_bytes()
+                    finally:
+                        Path(path).unlink(missing_ok=True)
+            except Exception as exc:
+                print(f"TTS synthesize error ({self._backend}): {exc}")
+        return None
+
     @staticmethod
     def _prepare_text_for_tts(text: str) -> str:
         """Edge-TTS can fail on ultra-short strings like 'Oo.' — pad naturally."""

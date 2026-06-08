@@ -2,3 +2,4 @@
 /apps/tanaw-mobile/node_modules
 /apps/tanaw-mobile/dist-web
 /apps/tanaw-mobile/.expo
+.env

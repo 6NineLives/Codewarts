@@ -9,7 +9,10 @@
     "scheme": "tanawmobile",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow TANAW to access your camera for real-time sign tracking and recording."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +22,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.tanawmobile"
+      "package": "com.anonymous.tanawmobile",
+      "permissions": ["android.permission.CAMERA"]
     },
     "web": {
       "bundler": "metro",
@@ -27,7 +31,16 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow TANAW to access your camera for sign language translation and recording.",
+          "microphonePermission": "Allow TANAW to access your microphone for video recording.",
+          "recordAudioAndroid": true
+        }
+      ],
       [
         "expo-splash-screen",
         {
