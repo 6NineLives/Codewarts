@@ -1,5 +1,14 @@
 import { File } from 'expo-file-system';
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type RefObject } from 'react';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -34,9 +43,10 @@ async function readTempImageBase64(path: string): Promise<string | null> {
 /** Grab a low-res preview snapshot — does not interrupt the live video stream. */
 async function capturePreviewSnapshot(cameraRef: RefObject<CameraRef | null>): Promise<string | null> {
   if (!cameraRef.current) return null;
+
   try {
     const image = await cameraRef.current.takeSnapshot();
-    const path = await image.saveToTemporaryFileAsync('jpg', 35);
+    const path = await image.saveToTemporaryFileAsync('jpg', 32);
     image.dispose();
     return await readTempImageBase64(path);
   } catch {
@@ -44,28 +54,69 @@ async function capturePreviewSnapshot(cameraRef: RefObject<CameraRef | null>): P
   }
 }
 
-export const VisionBonesCameraImpl = forwardRef<BonesCameraRef, BonesCameraProps>(
-  function VisionBonesCameraImpl({ landmarks, onCameraReady }, ref) {
+const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
+  function VisionBonesCameraInner(
+    { landmarks, isActive = true, onCameraReady, onCameraError },
+    ref,
+  ) {
     const cameraRef = useRef<CameraRef>(null);
     const [facing, setFacing] = useState<CameraPosition>('front');
     const [isReady, setIsReady] = useState(false);
     const [viewport, setViewport] = useState({ width: 0, height: 0 });
+    const [fatalError, setFatalError] = useState<string | null>(null);
+    const [sessionKey, setSessionKey] = useState(0);
     const { hasPermission, requestPermission } = useCameraPermission();
     const device = useCameraDevice(facing);
+
+    const handleFatalError = useCallback(
+      (message: string) => {
+        setIsReady(false);
+        setFatalError(message);
+        onCameraError?.(message);
+      },
+      [onCameraError],
+    );
+
+    const retryCamera = useCallback(() => {
+      setFatalError(null);
+      setIsReady(false);
+      setSessionKey((key) => key + 1);
+    }, []);
 
     const toggleFacing = useCallback(() => {
       setFacing((current) => (current === 'front' ? 'back' : 'front'));
       setIsReady(false);
+      setFatalError(null);
     }, []);
+
+    // Resume bones loop when tab refocuses and preview is already running.
+    useEffect(() => {
+      if (isActive && isReady && !fatalError) {
+        onCameraReady?.();
+      }
+    }, [fatalError, isActive, isReady, onCameraReady]);
 
     useImperativeHandle(
       ref,
       () => ({
-        captureFrameBase64: () => capturePreviewSnapshot(cameraRef),
-        isReady: () => isReady,
+        captureFrameBase64: () => {
+          if (!isActive || fatalError) return Promise.resolve(null);
+          return capturePreviewSnapshot(cameraRef);
+        },
+        isReady: () => isActive && isReady && !fatalError,
         toggleFacing,
       }),
-      [isReady, toggleFacing],
+      [fatalError, isActive, isReady, toggleFacing],
+    );
+
+    const onLayout = useCallback(
+      (event: { nativeEvent: { layout: { width: number; height: number } } }) => {
+        const { width, height } = event.nativeEvent.layout;
+        setViewport((prev) =>
+          prev.width === width && prev.height === height ? prev : { width, height },
+        );
+      },
+      [],
     );
 
     if (!hasPermission) {
@@ -92,20 +143,33 @@ export const VisionBonesCameraImpl = forwardRef<BonesCameraRef, BonesCameraProps
       );
     }
 
+    if (fatalError) {
+      return (
+        <View className="flex-1 bg-charcoal items-center justify-center px-8">
+          <Text className="text-cream font-jua text-lg text-center mb-2">Camera unavailable</Text>
+          <Text className="text-cream/70 font-jua text-sm text-center mb-6 leading-5">
+            {fatalError.includes('device policy')
+              ? 'The camera may be in use by another app or restricted by your device. Close other camera apps, then retry.'
+              : 'The camera session stopped unexpectedly. Tap retry to reopen it.'}
+          </Text>
+          <Pressable onPress={retryCamera} className="bg-forestGreen rounded-full px-6 py-3">
+            <Text className="text-cream font-jua text-base">Retry camera</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
     return (
-      <View
-        className="flex-1 bg-black"
-        onLayout={(event) => {
-          const { width, height } = event.nativeEvent.layout;
-          setViewport({ width, height });
-        }}
-      >
+      <View className="flex-1 bg-black" onLayout={onLayout}>
         <Camera
+          key={`${sessionKey}-${facing}`}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           device={device}
-          isActive
+          isActive={isActive}
+          onError={(error) => handleFatalError(error.message)}
           onPreviewStarted={() => {
+            if (!isActive) return;
             setIsReady(true);
             onCameraReady?.();
           }}
@@ -122,3 +186,5 @@ export const VisionBonesCameraImpl = forwardRef<BonesCameraRef, BonesCameraProps
     );
   },
 );
+
+export const VisionBonesCameraImpl = memo(VisionBonesCameraInner);

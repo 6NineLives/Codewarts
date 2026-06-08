@@ -14,6 +14,8 @@ export type CameraViewportRef = {
 
 type CameraViewportProps = {
   defaultFacing?: CameraType;
+  /** Release the native camera session when false (tab blur). */
+  isActive?: boolean;
   /** Recording uses video mode (Create tab). */
   mode?: 'picture' | 'video';
   /**
@@ -30,6 +32,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
   function CameraViewport(
     {
       defaultFacing = 'front',
+      isActive = true,
       mode = 'video',
       enableBonesCapture = false,
       showFlipButton = false,
@@ -57,7 +60,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
       ref,
       () => ({
         captureVideoFrameBase64: async () => {
-          if (!cameraRef.current || !isCameraReady) return null;
+          if (!cameraRef.current || !isCameraReady || !isActive) return null;
           try {
             const frame = await cameraRef.current.takePictureAsync({
               base64: true,
@@ -74,7 +77,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
             return null;
           }
         },
-        isReady: () => isCameraReady,
+        isReady: () => isActive && isCameraReady,
         startRecording: async () => {
           if (!cameraRef.current || isRecording) return;
           setIsRecording(true);
@@ -99,7 +102,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
         toggleFacing,
         getFacing: () => facing,
       }),
-      [facing, isCameraReady, isRecording, toggleFacing],
+      [facing, isActive, isCameraReady, isRecording, toggleFacing],
     );
 
     if (!permission) {
@@ -134,6 +137,7 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
           ref={cameraRef}
           style={styles.camera}
           facing={facing}
+          active={isActive}
           mode={cameraMode}
           mirror={facing === 'front'}
           animateShutter={false}

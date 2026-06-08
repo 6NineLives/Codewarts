@@ -26,7 +26,7 @@ export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
 
   return (
     <View
-      className="bg-forestGreen rounded-t-[30px] px-6 pt-3"
+      className="bg-forestGreen rounded-t-[30px] px-6 pt-3 absolute bottom-0 left-0 right-0 z-50"
       style={{
         paddingBottom: Math.max(insets.bottom, 12),
       }}

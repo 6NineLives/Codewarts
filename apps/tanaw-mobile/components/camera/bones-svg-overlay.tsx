@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import Svg, { Circle, Line } from 'react-native-svg';
 
@@ -85,7 +85,7 @@ function renderConnections(
   );
 }
 
-export function BonesSvgOverlay({ landmarks, width, height, mirrorX = false }: BonesSvgOverlayProps) {
+function BonesSvgOverlayImpl({ landmarks, width, height, mirrorX = false }: BonesSvgOverlayProps) {
   const content = useMemo(() => {
     if (!landmarks || width <= 0 || height <= 0) return null;
     return (
@@ -124,8 +124,15 @@ export function BonesSvgOverlay({ landmarks, width, height, mirrorX = false }: B
   if (!content) return null;
 
   return (
-    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Svg
+      width={width}
+      height={height}
+      style={[StyleSheet.absoluteFill, { zIndex: 10, elevation: 10 }]}
+      pointerEvents="none"
+    >
       {content}
     </Svg>
   );
 }
+
+export const BonesSvgOverlay = memo(BonesSvgOverlayImpl);

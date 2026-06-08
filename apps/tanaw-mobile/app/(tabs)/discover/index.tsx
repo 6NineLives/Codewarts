@@ -20,7 +20,7 @@ export default function DiscoverGridScreen() {
   return (
     <View className="flex-1 bg-cream">
       <TanawAppBar />
-      <ScrollView className="flex-1" contentContainerClassName="px-5 pb-8 pt-2">
+      <ScrollView className="flex-1" contentContainerClassName="px-5 pb-32 pt-2">
         <SectionHeader />
         <FilterPills active={activeFilter} onChange={setActiveFilter} />
 

@@ -3,6 +3,7 @@
  * Demo sign reveals + transcript timing live here; backend provides bones + TTS + Gemini.
  */
 
+import { useFocusEffect } from '@react-navigation/native';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
@@ -16,10 +17,16 @@ import {
 } from '@/mocks/translate-demo';
 import { fetchTtsAudio, sendBonesFrame, translateSigns } from '@/services/translate-api';
 import type { BonesLandmarks } from '@/types/bones-landmarks';
+import { landmarksEqual } from '@/utils/landmarks-equal';
 
-/** Background snapshot cadence — decoupled from API latency (~15–20 capture attempts/s). */
-const BONES_TICK_MS = 55;
-const BONES_FAIL_BACKOFF_MS = 250;
+/**
+ * Adaptive capture pacing — high FPS when the pipeline keeps up,
+ * backs off when inference is busy so the preview stays smooth.
+ */
+const CAPTURE_CATCHUP_MS = 45;
+const CAPTURE_IDLE_MS = 68;
+const CAPTURE_BUSY_MS = 95;
+const BONES_FAIL_BACKOFF_MS = 320;
 
 export type TranslateDemoState = {
   isTranslating: boolean;
@@ -28,6 +35,7 @@ export type TranslateDemoState = {
   hasLandmarks: boolean;
   toggleTranslating: () => void;
   onCameraReady: () => void;
+  onCameraError: () => void;
 };
 
 export function useTranslateDemo(
@@ -49,6 +57,7 @@ export function useTranslateDemo(
   const pendingFrameRef = useRef<string | null>(null);
   const inferenceGenerationRef = useRef(0);
   const inferenceAbortRef = useRef<AbortController | null>(null);
+  const latestLandmarksRef = useRef<BonesLandmarks | null>(null);
   const cameraReadyRef = useRef(false);
   const consecutiveCaptureFailRef = useRef(0);
   const lastSpokenRef = useRef('');
@@ -61,9 +70,11 @@ export function useTranslateDemo(
 
   const stopBonesLoop = useCallback(() => {
     bonesPumpActiveRef.current = false;
+    captureInFlightRef.current = false;
     pendingFrameRef.current = null;
     inferenceAbortRef.current?.abort();
     inferenceAbortRef.current = null;
+    inferenceInFlightRef.current = false;
     if (bonesPumpTimerRef.current) {
       clearTimeout(bonesPumpTimerRef.current);
       bonesPumpTimerRef.current = null;
@@ -156,6 +167,15 @@ export function useTranslateDemo(
     }
   }, [startTranslating, stopTranslating]);
 
+  const scheduleBonesPumpRef = useRef<(delayMs?: number) => void>(() => {});
+
+  const getAdaptiveCaptureDelay = useCallback(() => {
+    if (consecutiveCaptureFailRef.current > 0) return BONES_FAIL_BACKOFF_MS;
+    if (inferenceInFlightRef.current) return CAPTURE_BUSY_MS;
+    if (!pendingFrameRef.current) return CAPTURE_CATCHUP_MS;
+    return CAPTURE_IDLE_MS;
+  }, []);
+
   const drainInferenceQueue = useCallback(() => {
     if (inferenceInFlightRef.current || !pendingFrameRef.current) return;
 
@@ -172,8 +192,13 @@ export function useTranslateDemo(
       .then((result) => {
         if (generation !== inferenceGenerationRef.current) return;
         if (result.landmarks) {
-          setLandmarks(result.landmarks);
-          setHasLandmarks(result.hasLandmarks);
+          if (!landmarksEqual(latestLandmarksRef.current, result.landmarks)) {
+            latestLandmarksRef.current = result.landmarks;
+            setLandmarks(result.landmarks);
+          }
+          setHasLandmarks((prev) =>
+            prev === result.hasLandmarks ? prev : result.hasLandmarks,
+          );
         } else if (__DEV__ && result.error) {
           console.warn('[bones]', result.error);
         }
@@ -189,46 +214,64 @@ export function useTranslateDemo(
           inferenceInFlightRef.current = false;
         }
         drainInferenceQueue();
+        if (bonesPumpActiveRef.current) {
+          scheduleBonesPumpRef.current(CAPTURE_CATCHUP_MS);
+        }
       });
   }, []);
 
   const enqueueFrameForLandmarks = useCallback(
     (base64: string) => {
       pendingFrameRef.current = base64;
-      if (inferenceInFlightRef.current) {
-        inferenceAbortRef.current?.abort();
-        inferenceInFlightRef.current = false;
-      }
       drainInferenceQueue();
     },
     [drainInferenceQueue],
   );
 
-  const tickBonesLoop = useCallback(() => {
-    if (!bonesPumpActiveRef.current) return;
-
+  const attemptCapture = useCallback(() => {
     if (
-      !captureInFlightRef.current &&
-      cameraReadyRef.current &&
-      cameraRef.current?.isReady()
+      captureInFlightRef.current ||
+      !bonesPumpActiveRef.current ||
+      !cameraReadyRef.current ||
+      !cameraRef.current?.isReady()
     ) {
-      captureInFlightRef.current = true;
-      void cameraRef.current.captureFrameBase64().then((base64) => {
-        captureInFlightRef.current = false;
-        if (!base64) {
-          consecutiveCaptureFailRef.current += 1;
-          return;
-        }
-        consecutiveCaptureFailRef.current = 0;
-        enqueueFrameForLandmarks(base64);
-      });
+      return;
     }
 
-    if (!bonesPumpActiveRef.current) return;
-    const delayMs =
-      consecutiveCaptureFailRef.current > 0 ? BONES_FAIL_BACKOFF_MS : BONES_TICK_MS;
-    bonesPumpTimerRef.current = setTimeout(tickBonesLoop, delayMs);
+    captureInFlightRef.current = true;
+    void cameraRef.current.captureFrameBase64().then((base64) => {
+      captureInFlightRef.current = false;
+      if (!base64) {
+        // Only backoff on real snapshot errors — not when the camera is paused between tabs.
+        if (cameraRef.current?.isReady()) {
+          consecutiveCaptureFailRef.current += 1;
+        }
+        return;
+      }
+      consecutiveCaptureFailRef.current = 0;
+      enqueueFrameForLandmarks(base64);
+    });
   }, [cameraRef, enqueueFrameForLandmarks]);
+
+  const tickBonesLoop = useCallback(
+    (overrideDelayMs?: number) => {
+      if (!bonesPumpActiveRef.current) return;
+
+      attemptCapture();
+
+      const delayMs = overrideDelayMs ?? getAdaptiveCaptureDelay();
+      bonesPumpTimerRef.current = setTimeout(() => tickBonesLoop(), delayMs);
+    },
+    [attemptCapture, getAdaptiveCaptureDelay],
+  );
+
+  scheduleBonesPumpRef.current = (delayMs?: number) => {
+    if (!bonesPumpActiveRef.current) return;
+    if (bonesPumpTimerRef.current) {
+      clearTimeout(bonesPumpTimerRef.current);
+    }
+    bonesPumpTimerRef.current = setTimeout(() => tickBonesLoop(delayMs), delayMs ?? 0);
+  };
 
   const startBonesLoop = useCallback(() => {
     if (!cameraReadyRef.current) return;
@@ -241,6 +284,19 @@ export function useTranslateDemo(
     cameraReadyRef.current = true;
     startBonesLoop();
   }, [startBonesLoop]);
+
+  const onCameraError = useCallback(() => {
+    consecutiveCaptureFailRef.current += 3;
+    stopBonesLoop();
+  }, [stopBonesLoop]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopBonesLoop();
+      };
+    }, [stopBonesLoop]),
+  );
 
   useEffect(() => {
     void Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
@@ -260,5 +316,6 @@ export function useTranslateDemo(
     hasLandmarks,
     toggleTranslating,
     onCameraReady,
+    onCameraError,
   };
 }

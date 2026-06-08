@@ -1,3 +1,4 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useRef, useState, type RefObject } from 'react';
 
 import type { CameraViewportRef } from '@/components/camera/camera-viewport';
@@ -7,6 +8,8 @@ export function useVideoRecorder(cameraRef: RefObject<CameraViewportRef | null>)
   const [lastRecordingUri, setLastRecordingUri] = useState<string | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRecordingRef = useRef(false);
+  isRecordingRef.current = isRecording;
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -41,6 +44,18 @@ export function useVideoRecorder(cameraRef: RefObject<CameraViewportRef | null>)
       setRecordingSeconds(0);
     }
   }, [cameraRef, clearTimer, isRecording]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (!isRecordingRef.current) return;
+        clearTimer();
+        setRecordingSeconds(0);
+        setIsRecording(false);
+        void cameraRef.current?.stopRecording();
+      };
+    }, [cameraRef, clearTimer]),
+  );
 
   return {
     isRecording,

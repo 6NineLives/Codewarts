@@ -9,5 +9,8 @@ import type { BonesLandmarks } from '@/types/bones-landmarks';
 
 export type BonesCameraProps = {
   landmarks?: BonesLandmarks | null;
+  /** Release the native camera session when false (tab blur / errors). */
+  isActive?: boolean;
   onCameraReady?: () => void;
+  onCameraError?: (message: string) => void;
 };
