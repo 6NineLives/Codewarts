@@ -11,7 +11,6 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Conv1D
 from tensorflow.keras.regularizers import l2
 import threading
-import pyttsx3
 import joblib
 from pathlib import Path
 from datetime import datetime
@@ -20,6 +19,8 @@ import time
 
 from fsl_landmarks import HolisticTracker, KEYPOINT_DIM
 from semantic_layer import SemanticInterpreter
+from sign_labels import to_tagalog
+from tts_engine import TagalogTTS
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELS_DIR = BASE_DIR / "models"
@@ -229,11 +230,8 @@ class FSLTranslatorApp:
         self.live_sign = ""
         self.live_confidence = 0.0
 
-        self.tts_lock = threading.Lock()
-        self.tts_voice_id = None
-        self.tts_rate = 180
-        self.tts_volume = 0.9
-        self.tts_available = self._init_tts_preferences()
+        self.tts = TagalogTTS()
+        self.tts_available = self.tts.available
 
         self.setup_ui()
         self.load_model()
@@ -441,11 +439,11 @@ class FSLTranslatorApp:
                 return
             signs_copy = list(self.detected_signs)
 
-        display = sign.replace("_", " ")
+        display = to_tagalog(sign)
         interim = SemanticInterpreter._fallback(signs_copy)
-        self.root.after(0, lambda: self.label_display.config(text=f"{display} ({confidence:.0%})"))
+        self.root.after(0, lambda: self.label_display.config(text=display))
         self.root.after(0, lambda: self._update_transcript_display(interim))
-        print(f"Recorded: {sign} ({confidence:.0%}) → {interim}")
+        print(f"Recorded: {display} ({confidence:.0%}) → {interim}")
         self._schedule_semantic_update()
 
     def _schedule_semantic_update(self):
@@ -514,10 +512,7 @@ class FSLTranslatorApp:
                     self._last_live_sign = sign or ""
                     self._last_live_conf = confidence
                     self._last_label_update_ms = now_ms
-                    live_text = (
-                        f"{sign.replace('_', ' ')} ({confidence:.0%})"
-                        if sign else "—"
-                    )
+                    live_text = to_tagalog(sign) if sign else "—"
                     self.root.after(0, lambda t=live_text: self.label_display.config(text=t))
 
                 recorded = self.sign_detector.update(
@@ -558,62 +553,12 @@ class FSLTranslatorApp:
             print(f"Frame update error: {exc}")
         self.root.after(DISPLAY_INTERVAL_MS, self.update_frame)
 
-    def _init_tts_preferences(self):
-        engine = None
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty("rate", self.tts_rate)
-            engine.setProperty("volume", self.tts_volume)
-            voices = engine.getProperty("voices")
-            if voices:
-                self.tts_voice_id = voices[0].id
-            return True
-        except Exception as exc:
-            print(f"TTS init failed: {exc}")
-            return False
-        finally:
-            if engine:
-                try:
-                    engine.stop()
-                except Exception:
-                    pass
-
     def speak_text(self, text):
         if not self.tts_available or not text.strip():
             return
 
         def worker():
-            with self.tts_lock:
-                com_init = False
-                try:
-                    import pythoncom
-                    pythoncom.CoInitialize()
-                    com_init = True
-                except ImportError:
-                    pass
-                engine = None
-                try:
-                    engine = pyttsx3.init()
-                    engine.setProperty("rate", self.tts_rate)
-                    engine.setProperty("volume", self.tts_volume)
-                    if self.tts_voice_id:
-                        engine.setProperty("voice", self.tts_voice_id)
-                    engine.say(text.strip())
-                    engine.runAndWait()
-                except Exception as exc:
-                    print(f"TTS error: {exc}")
-                finally:
-                    if engine:
-                        try:
-                            engine.stop()
-                        except Exception:
-                            pass
-                    if com_init:
-                        try:
-                            import pythoncom
-                            pythoncom.CoUninitialize()
-                        except Exception:
-                            pass
+            self.tts.speak(text)
 
         threading.Thread(target=worker, daemon=True).start()
 

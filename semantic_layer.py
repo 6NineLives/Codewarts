@@ -1,5 +1,5 @@
 """
-Gemini-powered semantic layer: turns detected sign labels into natural English.
+Gemini-powered semantic layer: turns detected sign labels into natural Tagalog.
 """
 
 from __future__ import annotations
@@ -10,19 +10,21 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from sign_labels import to_tagalog, to_tagalog_list
+
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-SYSTEM_PROMPT = """You are a Filipino Sign Language translation assistant.
-You receive a sequence of detected sign labels from a live recognition system.
-Combine them into one short, natural English sentence or phrase.
+SYSTEM_PROMPT = """Ikaw ay isang katulong sa pagsasalin ng Filipino Sign Language (FSL).
+Tatanggap ka ng sunod-sunod na mga senyas mula sa live recognition system.
+Pag-isahin mo ang mga ito sa isang maikli at natural na pangungusap o parirala sa TAGALOG.
 
-Rules:
-- Use only the signs provided; do not invent signs.
-- Fix grammar and word order (e.g. TODAY + SUNDAY -> "Today is Sunday").
-- Keep responses concise (one or two sentences max).
-- Return ONLY the interpreted English text, no quotes or explanation.
-- If signs are unrelated, join them clearly with proper punctuation.
-- Label format uses underscores (e.g. THANK_YOU, HOW_ARE_YOU, IM_FINE)."""
+Mga alituntunin:
+- Gamitin lamang ang ibinigay na mga senyas; huwag mag-imbento.
+- Ayusin ang gramatika at ayos ng salita sa natural na Tagalog.
+- Panatilihing maikli ang sagot (isa o dalawang pangungusap lang).
+- Ibabalik mo LAMANG ang isinaling teksto sa Tagalog — walang quotes, paliwanag, o Ingles.
+- Kung hindi magkaugnay ang mga senyas, pagdugtungin nang malinaw gamit ang tamang bantas.
+- Ang mga senyas ay ibinibigay sa Tagalog (hal. Salamat, Kumusta ka?, Okay lang ako)."""
 
 
 class SemanticInterpreter:
@@ -49,7 +51,7 @@ class SemanticInterpreter:
                 system_instruction=SYSTEM_PROMPT,
             )
             self._available = True
-            print(f"Semantic layer ready ({model_name})")
+            print(f"Semantic layer ready ({model_name}, Tagalog output)")
         except Exception as exc:
             print(f"Semantic layer init failed: {exc}")
 
@@ -58,15 +60,16 @@ class SemanticInterpreter:
         return self._available
 
     def interpret(self, signs: list[str]) -> str:
-        """Convert sign labels to natural English."""
+        """Convert sign labels to natural Tagalog."""
         if not signs:
             return ""
 
         if not self._available:
             return self._fallback(signs)
 
-        labels_text = ", ".join(signs)
-        prompt = f"Detected signs (in order): {labels_text}"
+        tagalog_signs = to_tagalog_list(signs)
+        labels_text = ", ".join(tagalog_signs)
+        prompt = f"Natukoy na mga senyas (sunod-sunod): {labels_text}"
 
         with self._lock:
             try:
@@ -79,8 +82,10 @@ class SemanticInterpreter:
 
     @staticmethod
     def _fallback(signs: list[str]) -> str:
-        words = [s.replace("_", " ").lower() for s in signs]
+        words = to_tagalog_list(signs)
         if not words:
             return ""
         sentence = " ".join(words)
-        return sentence[0].upper() + sentence[1:] + "."
+        if sentence and sentence[-1] not in ".?!":
+            sentence += "."
+        return sentence[0].upper() + sentence[1:] if sentence else ""
