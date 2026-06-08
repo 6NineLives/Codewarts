@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import sys
+import threading
 from pathlib import Path
 
 import cv2
@@ -15,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from fsl_landmarks import HolisticTracker  # noqa: E402
 
-TRACKER_PROCESS_WIDTH = 480
+TRACKER_PROCESS_WIDTH = 320
 
 
 class InferenceEngine:
@@ -26,6 +27,7 @@ class InferenceEngine:
     def __init__(self) -> None:
         self.tracker: HolisticTracker | None = None
         self.tracker_error: str | None = None
+        self._process_lock = threading.Lock()
         self._init_tracker()
 
     @classmethod
@@ -58,15 +60,20 @@ class InferenceEngine:
     def _serialize_landmarks(self, arr: np.ndarray | None, include_visibility: bool = False) -> list[dict] | None:
         if arr is None or arr.size == 0:
             return None
-        points: list[dict] = []
-        for row in arr:
-            x = float(row[0])
-            y = float(row[1])
-            v = float(row[3]) if include_visibility and arr.shape[1] >= 4 else 1.0
-            points.append({"x": x, "y": y, "v": v})
-        return points
+        return [
+            {
+                "x": float(row[0]),
+                "y": float(row[1]),
+                "v": float(row[3]) if include_visibility and arr.shape[1] >= 4 else 1.0,
+            }
+            for row in arr
+        ]
 
     def process_frame(self, image_base64: str, draw_bones: bool = False) -> dict:
+        with self._process_lock:
+            return self._process_frame_unlocked(image_base64, draw_bones)
+
+    def _process_frame_unlocked(self, image_base64: str, draw_bones: bool = False) -> dict:
         if not self.tracker:
             return {
                 "overlayImageBase64": None,

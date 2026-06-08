@@ -17,9 +17,9 @@ import {
 import { fetchTtsAudio, sendBonesFrame, translateSigns } from '@/services/translate-api';
 import type { BonesLandmarks } from '@/types/bones-landmarks';
 
-/** How often we attempt a background preview snapshot (~8–10 fps). */
-const BONES_TICK_MS = 120;
-const BONES_FAIL_BACKOFF_MS = 400;
+/** Background snapshot cadence — decoupled from API latency (~15–20 capture attempts/s). */
+const BONES_TICK_MS = 55;
+const BONES_FAIL_BACKOFF_MS = 250;
 
 export type TranslateDemoState = {
   isTranslating: boolean;
@@ -45,6 +45,10 @@ export function useTranslateDemo(
   const bonesPumpActiveRef = useRef(false);
   const bonesPumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureInFlightRef = useRef(false);
+  const inferenceInFlightRef = useRef(false);
+  const pendingFrameRef = useRef<string | null>(null);
+  const inferenceGenerationRef = useRef(0);
+  const inferenceAbortRef = useRef<AbortController | null>(null);
   const cameraReadyRef = useRef(false);
   const consecutiveCaptureFailRef = useRef(0);
   const lastSpokenRef = useRef('');
@@ -57,6 +61,9 @@ export function useTranslateDemo(
 
   const stopBonesLoop = useCallback(() => {
     bonesPumpActiveRef.current = false;
+    pendingFrameRef.current = null;
+    inferenceAbortRef.current?.abort();
+    inferenceAbortRef.current = null;
     if (bonesPumpTimerRef.current) {
       clearTimeout(bonesPumpTimerRef.current);
       bonesPumpTimerRef.current = null;
@@ -149,25 +156,53 @@ export function useTranslateDemo(
     }
   }, [startTranslating, stopTranslating]);
 
-  const submitFrameForLandmarks = useCallback((base64: string) => {
-    void sendBonesFrame(base64)
+  const drainInferenceQueue = useCallback(() => {
+    if (inferenceInFlightRef.current || !pendingFrameRef.current) return;
+
+    const base64 = pendingFrameRef.current;
+    pendingFrameRef.current = null;
+    const generation = ++inferenceGenerationRef.current;
+
+    inferenceAbortRef.current?.abort();
+    const controller = new AbortController();
+    inferenceAbortRef.current = controller;
+    inferenceInFlightRef.current = true;
+
+    void sendBonesFrame(base64, controller.signal)
       .then((result) => {
+        if (generation !== inferenceGenerationRef.current) return;
         if (result.landmarks) {
           setLandmarks(result.landmarks);
           setHasLandmarks(result.hasLandmarks);
-          if (__DEV__ && result.hasLandmarks) {
-            console.log('[bones] landmarks updated');
-          }
         } else if (__DEV__ && result.error) {
           console.warn('[bones]', result.error);
         }
       })
       .catch((error) => {
+        if (controller.signal.aborted) return;
         if (__DEV__) {
           console.warn('[bones] request failed:', error);
         }
+      })
+      .finally(() => {
+        if (generation === inferenceGenerationRef.current) {
+          inferenceInFlightRef.current = false;
+        }
+        drainInferenceQueue();
       });
   }, []);
+
+  const enqueueFrameForLandmarks = useCallback(
+    (base64: string) => {
+      pendingFrameRef.current = base64;
+      if (inferenceInFlightRef.current) {
+        inferenceAbortRef.current?.abort();
+        inferenceInFlightRef.current = false;
+      }
+      drainInferenceQueue();
+    },
+    [drainInferenceQueue],
+  );
 
   const tickBonesLoop = useCallback(() => {
     if (!bonesPumpActiveRef.current) return;
@@ -185,7 +220,7 @@ export function useTranslateDemo(
           return;
         }
         consecutiveCaptureFailRef.current = 0;
-        submitFrameForLandmarks(base64);
+        enqueueFrameForLandmarks(base64);
       });
     }
 
@@ -193,7 +228,7 @@ export function useTranslateDemo(
     const delayMs =
       consecutiveCaptureFailRef.current > 0 ? BONES_FAIL_BACKOFF_MS : BONES_TICK_MS;
     bonesPumpTimerRef.current = setTimeout(tickBonesLoop, delayMs);
-  }, [cameraRef, submitFrameForLandmarks]);
+  }, [cameraRef, enqueueFrameForLandmarks]);
 
   const startBonesLoop = useCallback(() => {
     if (!cameraReadyRef.current) return;

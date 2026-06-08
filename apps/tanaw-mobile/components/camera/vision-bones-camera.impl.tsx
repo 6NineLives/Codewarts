@@ -36,7 +36,7 @@ async function capturePreviewSnapshot(cameraRef: RefObject<CameraRef | null>): P
   if (!cameraRef.current) return null;
   try {
     const image = await cameraRef.current.takeSnapshot();
-    const path = await image.saveToTemporaryFileAsync('jpg', 50);
+    const path = await image.saveToTemporaryFileAsync('jpg', 35);
     image.dispose();
     return await readTempImageBase64(path);
   } catch {

@@ -26,11 +26,15 @@ export async function checkHealth(): Promise<HealthStatus> {
   return apiRequest<HealthStatus>('/health');
 }
 
-export async function sendBonesFrame(imageBase64: string): Promise<BonesFrameResult> {
+export async function sendBonesFrame(
+  imageBase64: string,
+  signal?: AbortSignal,
+): Promise<BonesFrameResult> {
   return apiRequest<BonesFrameResult>('/inference/frame', {
     method: 'POST',
     body: { imageBase64, drawBones: false },
-    timeoutMs: 12000,
+    timeoutMs: 8000,
+    signal,
   });
 }
 

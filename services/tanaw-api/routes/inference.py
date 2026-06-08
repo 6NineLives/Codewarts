@@ -25,7 +25,7 @@ from schemas.inference import (  # noqa: E402
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 _semantic = SemanticInterpreter()
-_frame_pool = ThreadPoolExecutor(max_workers=2)
+_frame_pool = ThreadPoolExecutor(max_workers=1)
 
 
 @router.post("/session", response_model=SessionCreateResponse)

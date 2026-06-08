@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 
 import type { Contribution } from '@/contracts/contribution';
 
@@ -16,7 +16,15 @@ export function ContributionCard({ item, onPress }: ContributionCardProps) {
       style={{ aspectRatio: 165 / 270 }}
     >
       <View className="flex-1 items-center justify-center bg-charcoal/90">
-        <Text className="text-5xl">🤟</Text>
+        {item.thumbnailUrl ? (
+          <Image 
+            source={{ uri: item.thumbnailUrl }} 
+            className="w-full h-full"
+            resizeMode="cover"
+          />
+        ) : (
+          <Text className="text-5xl">🤟</Text>
+        )}
       </View>
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -34,7 +42,15 @@ export function ImmersiveVideoSlide({ item }: { item: Contribution }) {
   return (
     <View className="flex-1 bg-charcoal items-center justify-center">
       <View className="absolute inset-0 items-center justify-center bg-charcoal">
-        <Text className="text-6xl">🤟</Text>
+        {item.thumbnailUrl ? (
+          <Image 
+            source={{ uri: item.thumbnailUrl }} 
+            className="w-full h-full"
+            resizeMode="cover"
+          />
+        ) : (
+          <Text className="text-6xl">🤟</Text>
+        )}
       </View>
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.8)']}

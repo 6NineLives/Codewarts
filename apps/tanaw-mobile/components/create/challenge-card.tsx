@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Text, View } from 'react-native';
+import { Image, Text, View } from 'react-native';
 
 import type { SignChallenge } from '@/contracts/create';
 
@@ -9,7 +9,7 @@ type ChallengeCardProps = {
 
 export function ChallengeCard({ challenge }: ChallengeCardProps) {
   return (
-    <View className="bg-cream rounded-card px-7 py-5 mx-6 mt-2">
+    <View className="bg-cream/90 rounded-card px-7 py-5 mx-6 mt-2">
       <View className="flex-row items-start justify-between">
         <View className="flex-1 pr-4">
           <View className="flex-row items-center gap-2 mb-2">
@@ -18,8 +18,12 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
           </View>
           <Text className="text-charcoal font-jua text-base">{challenge.meaningDisplay}</Text>
         </View>
-        <View className="w-[75px] h-[75px] rounded-full border-2 border-forestGreen items-center justify-center bg-cream">
-          <Text className="text-3xl">{challenge.illustrationEmoji ?? '🤟'}</Text>
+        <View className="w-[75px] h-[75px] rounded-full border-2 border-forestGreen items-center justify-center bg-cream overflow-hidden">
+          <Image 
+            source={{ uri: 'https://picsum.photos/seed/tanaw/150/150' }} 
+            className="w-full h-full"
+            resizeMode="cover"
+          />
         </View>
       </View>
     </View>

@@ -14,6 +14,7 @@ type RequestOptions = {
   method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
   timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 let resolvedBaseUrl: string | null = null;
@@ -23,9 +24,17 @@ async function fetchWithBase<T>(
   path: string,
   options: RequestOptions,
 ): Promise<T> {
-  const { method = 'GET', body, timeoutMs = 15000 } = options;
+  const { method = 'GET', body, timeoutMs = 15000, signal: externalSignal } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
 
   try {
     const response = await fetch(`${baseUrl}${path}`, {
