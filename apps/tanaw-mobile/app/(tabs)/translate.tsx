@@ -1,5 +1,6 @@
 import { memo, useRef, type RefObject } from 'react';
 import { View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BonesCameraRef } from '@/components/camera/bones-camera-types';
 import { CameraPlaceholder } from '@/components/camera/camera-placeholder';
@@ -8,12 +9,10 @@ import { TanawAppBar } from '@/components/shell/tanaw-app-bar';
 import { TranslateActionRow } from '@/components/translate/speak-button';
 import { TranslationCard } from '@/components/translate/translation-card';
 import { useDeferredCameraMount } from '@/hooks/use-deferred-camera-mount';
+import { useFloatingControlsBottom } from '@/hooks/use-floating-controls-bottom';
 import { useScreenFocus } from '@/hooks/use-screen-focus';
 import { useTranslateDemo } from '@/hooks/use-translate-demo';
 import type { BonesLandmarks } from '@/types/bones-landmarks';
-
-/** Clearance above the bottom tab bar for floating controls. */
-const CONTROLS_BOTTOM = 112;
 
 type TranslateControlsProps = {
   isTranslating: boolean;
@@ -28,10 +27,17 @@ const TranslateControls = memo(function TranslateControls({
   onToggleTranslating,
   onToggleCamera,
 }: TranslateControlsProps) {
+  const insets = useSafeAreaInsets();
+  const controlsBottom = useFloatingControlsBottom();
+
   return (
     <View
       className="absolute left-0 right-0 z-20"
-      style={{ bottom: CONTROLS_BOTTOM }}
+      style={{
+        bottom: controlsBottom,
+        paddingLeft: Math.max(insets.left, 0),
+        paddingRight: Math.max(insets.right, 0),
+      }}
     >
       <TranslationCard transcript={transcript} isTranslating={isTranslating} />
       <View className="mt-4">

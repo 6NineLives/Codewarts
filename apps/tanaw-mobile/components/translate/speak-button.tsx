@@ -52,7 +52,7 @@ export function TranslateActionRow({
   onToggleCamera?: () => void;
 }) {
   return (
-    <View className="flex-row items-center px-7 mb-4">
+    <View className="flex-row items-center px-7">
       <TranslateToggleButton isTranslating={isTranslating} onPress={onToggleTranslating} />
       <CameraToggleButton onPress={onToggleCamera} />
     </View>

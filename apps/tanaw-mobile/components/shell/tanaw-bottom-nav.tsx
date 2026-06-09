@@ -1,6 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { BottomTabBarHeightCallbackContext } from '@react-navigation/bottom-tabs';
+import { useContext } from 'react';
+import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { TAB_BAR_LAYOUT } from '@/constants/shell-layout';
 
 const TAB_CONFIG = [
   {
@@ -26,7 +30,7 @@ const TAB_CONFIG = [
 const CREAM = '#FAF1EA';
 const SAGE_GREEN = '#A6B385';
 
-const ICON_RING_SIZE = 50;
+const ICON_RING_SIZE = TAB_BAR_LAYOUT.iconSlotSize;
 
 export type TanawTabBarProps = {
   state: {
@@ -43,11 +47,20 @@ export type TanawTabBarProps = {
 
 export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
   const insets = useSafeAreaInsets();
+  const onTabBarHeightChange = useContext(BottomTabBarHeightCallbackContext);
+
+  const handleLayout = (event: LayoutChangeEvent) => {
+    onTabBarHeightChange?.(event.nativeEvent.layout.height);
+  };
 
   return (
     <View
-      className="bg-forestGreen rounded-t-[30px] px-5 pt-3 absolute bottom-0 left-0 right-0 z-50"
-      style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+      onLayout={handleLayout}
+      className="bg-forestGreen rounded-t-[30px] px-5 absolute bottom-0 left-0 right-0 z-50"
+      style={{
+        paddingTop: TAB_BAR_LAYOUT.paddingTop,
+        paddingBottom: Math.max(insets.bottom, TAB_BAR_LAYOUT.minBottomInset),
+      }}
     >
       <View style={styles.tabRow}>
         {state.routes.map((route, index) => {
@@ -107,14 +120,14 @@ const styles = StyleSheet.create({
   tabPressable: {
     flex: 1,
     alignItems: 'center',
-    paddingBottom: 2,
+    paddingBottom: TAB_BAR_LAYOUT.tabPressablePaddingBottom,
   },
   iconSlot: {
     width: ICON_RING_SIZE,
     height: ICON_RING_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: TAB_BAR_LAYOUT.iconMarginBottom,
   },
   iconHalo: {
     position: 'absolute',
@@ -139,6 +152,7 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontFamily: 'Jua_400Regular',
     fontSize: 11,
+    lineHeight: TAB_BAR_LAYOUT.labelLineHeight,
     letterSpacing: 0.2,
   },
   tabLabelActive: {

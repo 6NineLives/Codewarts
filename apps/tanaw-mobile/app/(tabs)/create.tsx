@@ -9,12 +9,10 @@ import { ChallengeCard } from '@/components/create/challenge-card';
 import { RecordShutter } from '@/components/create/record-shutter';
 import { TanawAppBar } from '@/components/shell/tanaw-app-bar';
 import { useDeferredCameraMount } from '@/hooks/use-deferred-camera-mount';
+import { useFloatingControlsBottom } from '@/hooks/use-floating-controls-bottom';
 import { useScreenFocus } from '@/hooks/use-screen-focus';
 import { useVideoRecorder } from '@/hooks/use-video-recorder';
 import { CREATE_DEMO_CHALLENGE } from '@/mocks/create-challenge';
-
-/** Clearance above the bottom tab bar for floating controls. */
-const CONTROLS_BOTTOM = 112;
 /** Space below the cream header before the challenge card. */
 const CHALLENGE_BELOW_HEADER = 28;
 /** Horizontal inset so the card sits inside the preview frame. */
@@ -28,6 +26,7 @@ function formatRecordingTime(seconds: number): string {
 
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
+  const controlsBottom = useFloatingControlsBottom();
   const cameraRef = useRef<CameraViewportRef>(null);
   const isScreenFocused = useScreenFocus();
   const mountCamera = useDeferredCameraMount(isScreenFocused);
@@ -68,8 +67,12 @@ export default function CreateScreen() {
       ) : null}
 
       <View
-        className="absolute left-0 right-0 flex-row items-center z-20 px-6"
-        style={{ bottom: CONTROLS_BOTTOM }}
+        className="absolute left-0 right-0 flex-row items-center z-20"
+        style={{
+          bottom: controlsBottom,
+          paddingLeft: Math.max(insets.left, 24),
+          paddingRight: Math.max(insets.right, 24),
+        }}
       >
         <View className="flex-1" />
         <View className="flex-1 items-center">
