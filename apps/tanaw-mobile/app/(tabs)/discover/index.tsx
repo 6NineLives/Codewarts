@@ -6,16 +6,23 @@ import { ContributionCard } from '@/components/discover/contribution-card';
 import { FilterPills, SectionHeader } from '@/components/discover/filter-pills';
 import { TanawAppBar } from '@/components/shell/tanaw-app-bar';
 import type { ContributionCategory } from '@/contracts/contribution';
-import { DISCOVER_CONTRIBUTIONS } from '@/mocks/discover-demo';
+import { useContributions } from '@/contexts/contributions-context';
+import { mergeDiscoverContributions } from '@/mocks/discover-demo';
 
 export default function DiscoverGridScreen() {
   const router = useRouter();
+  const { userContributions } = useContributions();
   const [activeFilter, setActiveFilter] = useState<ContributionCategory | 'all'>('all');
 
+  const allItems = useMemo(
+    () => mergeDiscoverContributions(userContributions),
+    [userContributions],
+  );
+
   const filteredItems = useMemo(() => {
-    if (activeFilter === 'all') return DISCOVER_CONTRIBUTIONS;
-    return DISCOVER_CONTRIBUTIONS.filter((item) => item.category === activeFilter);
-  }, [activeFilter]);
+    if (activeFilter === 'all') return allItems;
+    return allItems.filter((item) => item.category === activeFilter);
+  }, [activeFilter, allItems]);
 
   return (
     <View className="flex-1 bg-cream">

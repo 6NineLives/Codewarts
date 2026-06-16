@@ -1,10 +1,13 @@
-import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { CameraView, useCameraPermissions, useMicrophonePermissions, type CameraType } from 'expo-camera';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import type { BonesFrameMeta } from '@/types/bones-frame-meta';
 
 export type CameraViewportRef = {
   /** Sample the live preview as base64 JPEG for backend bones processing. */
   captureVideoFrameBase64: () => Promise<string | null>;
+  getBonesFrameMeta: () => BonesFrameMeta;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<string | null>;
   toggleFacing: () => void;
@@ -43,7 +46,10 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
   ) {
     const cameraRef = useRef<CameraView>(null);
     const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
+    const isRecordingRef = useRef(false);
+    const isCameraReadyRef = useRef(false);
     const [permission, requestPermission] = useCameraPermissions();
+    const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
     const [facing, setFacing] = useState<CameraType>(defaultFacing);
     const [isRecording, setIsRecording] = useState(false);
     const [isCameraReady, setIsCameraReady] = useState(false);
@@ -51,22 +57,46 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
     // Bones need frame sampling; Android video mode skips ImageCapture (ExpoCameraView.kt).
     // Picture pipeline still shows a live preview — same UX as desktop process_video.
     const cameraMode = enableBonesCapture ? 'picture' : mode;
+    const recordWithoutAudio = mode === 'video';
 
     const toggleFacing = useCallback(() => {
       setFacing((current) => (current === 'front' ? 'back' : 'front'));
     }, []);
 
+    const ensureRecordingPermissions = useCallback(async (): Promise<void> => {
+      if (!permission?.granted) {
+        const cameraResult = await requestPermission();
+        if (!cameraResult.granted) {
+          throw new Error('Camera permission is required to record.');
+        }
+      }
+
+      if (!recordWithoutAudio && !microphonePermission?.granted) {
+        const micResult = await requestMicrophonePermission();
+        if (!micResult.granted) {
+          throw new Error('Microphone permission is required to record video with audio.');
+        }
+      }
+    }, [
+      microphonePermission?.granted,
+      permission?.granted,
+      recordWithoutAudio,
+      requestMicrophonePermission,
+      requestPermission,
+    ]);
+
     useImperativeHandle(
       ref,
       () => ({
         captureVideoFrameBase64: async () => {
-          if (!cameraRef.current || !isCameraReady || !isActive) return null;
+          if (!cameraRef.current || !isCameraReadyRef.current || !isActive) return null;
           try {
             const frame = await cameraRef.current.takePictureAsync({
               base64: true,
               quality: 0.25,
               shutterSound: false,
-              skipProcessing: false,
+              // Raw sensor frame — predictable orientation; API mirrors for front preview.
+              skipProcessing: true,
             });
             return frame?.base64 ?? null;
           } catch (error) {
@@ -77,32 +107,58 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
             return null;
           }
         },
-        isReady: () => isActive && isCameraReady,
+        isReady: () => isActive && isCameraReadyRef.current,
         startRecording: async () => {
-          if (!cameraRef.current || isRecording) return;
+          if (!cameraRef.current || isRecordingRef.current || !isCameraReadyRef.current) {
+            throw new Error('Camera is not ready to record yet.');
+          }
+
+          await ensureRecordingPermissions();
+
+          isRecordingRef.current = true;
           setIsRecording(true);
-          recordingPromiseRef.current = cameraRef.current.recordAsync({
+
+          const recordingPromise = cameraRef.current.recordAsync({
             maxDuration: 60,
+          });
+          recordingPromiseRef.current = recordingPromise;
+
+          recordingPromise.catch((error) => {
+            if (__DEV__) {
+              console.warn('[camera] record failed', error);
+            }
+            isRecordingRef.current = false;
+            setIsRecording(false);
+            recordingPromiseRef.current = null;
           });
         },
         stopRecording: async () => {
-          if (!cameraRef.current || !isRecording) return null;
+          if (!cameraRef.current || !isRecordingRef.current) return null;
+
           try {
             cameraRef.current.stopRecording();
             const video = await recordingPromiseRef.current;
-            recordingPromiseRef.current = null;
-            setIsRecording(false);
             return video?.uri ?? null;
-          } catch {
+          } catch (error) {
+            if (__DEV__) {
+              console.warn('[camera] stop recording failed', error);
+            }
+            return null;
+          } finally {
+            isRecordingRef.current = false;
             recordingPromiseRef.current = null;
             setIsRecording(false);
-            return null;
           }
         },
         toggleFacing,
         getFacing: () => facing,
+        getBonesFrameMeta: () => ({
+          cameraFacing: facing,
+          captureKind: 'still-photo' as const,
+          frameMirrored: false,
+        }),
       }),
-      [facing, isActive, isCameraReady, isRecording, toggleFacing],
+      [ensureRecordingPermissions, facing, isActive, toggleFacing],
     );
 
     if (!permission) {
@@ -139,11 +195,13 @@ export const CameraViewport = forwardRef<CameraViewportRef, CameraViewportProps>
           facing={facing}
           active={isActive}
           mode={cameraMode}
+          mute={recordWithoutAudio}
           mirror={facing === 'front'}
           animateShutter={false}
           videoQuality="720p"
           videoStabilizationMode="off"
           onCameraReady={() => {
+            isCameraReadyRef.current = true;
             setIsCameraReady(true);
             onCameraReady?.();
           }}

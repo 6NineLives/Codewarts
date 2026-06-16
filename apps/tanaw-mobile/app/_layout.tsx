@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
 
+import { ContributionsProvider } from '@/contexts/contributions-context';
 import '../global.css';
 
 export { ErrorBoundary } from 'expo-router';
@@ -40,10 +41,12 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider style={{ flex: 1 }}>
-      <Stack screenOptions={{ headerShown: false, contentStyle: { flex: 1 } }}>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      </Stack>
+      <ContributionsProvider>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { flex: 1 } }}>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        </Stack>
+      </ContributionsProvider>
     </SafeAreaProvider>
   );
 }

@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ImmersiveVideoSlide } from '@/components/discover/contribution-card';
 import { TanawAppBar } from '@/components/shell/tanaw-app-bar';
 import type { Contribution } from '@/contracts/contribution';
-import { getImmersiveStartIndex, IMMERSIVE_FEED } from '@/mocks/discover-demo';
+import { useContributions } from '@/contexts/contributions-context';
+import { getImmersiveFeed, getImmersiveStartIndex } from '@/mocks/discover-demo';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -22,8 +23,16 @@ export default function DiscoverImmersiveScreen() {
   const router = useRouter();
   const listRef = useRef<FlatList<Contribution>>(null);
   const insets = useSafeAreaInsets();
+  const { userContributions } = useContributions();
 
-  const initialIndex = useMemo(() => getImmersiveStartIndex(id ?? '1'), [id]);
+  const immersiveFeed = useMemo(
+    () => getImmersiveFeed(userContributions),
+    [userContributions],
+  );
+  const initialIndex = useMemo(
+    () => getImmersiveStartIndex(id ?? '1', userContributions),
+    [id, userContributions],
+  );
 
   return (
     <View className="flex-1 bg-charcoal">
@@ -39,7 +48,7 @@ export default function DiscoverImmersiveScreen() {
 
       <FlatList
         ref={listRef}
-        data={IMMERSIVE_FEED}
+        data={immersiveFeed}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={{ height: SCREEN_HEIGHT }}>

@@ -24,6 +24,25 @@ HOLISTIC_MODEL_URL = (
 )
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "holistic_landmarker.task"
 
+PORTRAIT_ASPECT = 9 / 16
+
+
+def crop_to_aspect_ratio(frame: np.ndarray, aspect_ratio: float) -> np.ndarray:
+    """Center-crop frame to the target aspect ratio (width / height)."""
+    h, w = frame.shape[:2]
+    if h == 0 or w == 0:
+        return frame
+    current_ratio = w / h
+    if abs(current_ratio - aspect_ratio) < 0.01:
+        return frame
+    if current_ratio > aspect_ratio:
+        new_w = int(h * aspect_ratio)
+        x0 = (w - new_w) // 2
+        return frame[:, x0 : x0 + new_w]
+    new_h = int(w / aspect_ratio)
+    y0 = (h - new_h) // 2
+    return frame[y0 : y0 + new_h, :]
+
 # MediaPipe pose / hand topology (same as legacy Holistic drawing)
 POSE_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
@@ -151,7 +170,12 @@ def _draw_landmark_set(
 class HolisticTracker:
     """Holistic landmark tracking via MediaPipe Tasks API."""
 
-    def __init__(self, model_path: Path | None = None, process_width: int = 640):
+    def __init__(
+        self,
+        model_path: Path | None = None,
+        process_width: int = 640,
+        process_height: int | None = None,
+    ):
         import mediapipe as mp
         from mediapipe.tasks.python.core import base_options as base_options_module
         from mediapipe.tasks.python.vision import (
@@ -163,7 +187,10 @@ class HolisticTracker:
         self._mp = mp
         self._frame_ms = 0
         self._process_width = process_width
+        self._process_height = process_height
         self._rgb_buffer: np.ndarray | None = None
+        self._letterbox_canvas: np.ndarray | None = None
+        self._letterbox_meta: tuple[int, int, int, int] | None = None
         resolved = _download_holistic_model(model_path or DEFAULT_MODEL_PATH)
         options = HolisticLandmarkerOptions(
             base_options=base_options_module.BaseOptions(model_asset_path=str(resolved)),
@@ -174,8 +201,52 @@ class HolisticTracker:
         )
         self._landmarker = HolisticLandmarker.create_from_options(options)
 
+    def _remap_landmarks(self, arr: np.ndarray | None) -> np.ndarray | None:
+        """Map landmarks from letterboxed canvas back to the source crop (0–1)."""
+        if arr is None or self._letterbox_meta is None or self._process_height is None:
+            return arr
+        x0, y0, content_w, content_h = self._letterbox_meta
+        target_w = self._process_width
+        target_h = self._process_height
+        out = arr.copy()
+        out[:, 0] = (out[:, 0] * target_w - x0) / content_w
+        out[:, 1] = (out[:, 1] * target_h - y0) / content_h
+        np.clip(out[:, 0], 0.0, 1.0, out=out[:, 0])
+        np.clip(out[:, 1], 0.0, 1.0, out=out[:, 1])
+        return out
+
     def _prepare_rgb(self, bgr_image: np.ndarray) -> np.ndarray:
         h, w = bgr_image.shape[:2]
+
+        if self._process_height is not None:
+            target_w = self._process_width
+            target_h = self._process_height
+            scale = min(target_w / w, target_h / h)
+            content_w = max(1, int(w * scale))
+            content_h = max(1, int(h * scale))
+            resized = cv2.resize(bgr_image, (content_w, content_h), interpolation=cv2.INTER_AREA)
+            x0 = (target_w - content_w) // 2
+            y0 = (target_h - content_h) // 2
+
+            if (
+                self._letterbox_canvas is None
+                or self._letterbox_canvas.shape[:2] != (target_h, target_w)
+            ):
+                self._letterbox_canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            else:
+                self._letterbox_canvas.fill(0)
+            self._letterbox_canvas[y0 : y0 + content_h, x0 : x0 + content_w] = resized
+            self._letterbox_meta = (x0, y0, content_w, content_h)
+
+            if (
+                self._rgb_buffer is None
+                or self._rgb_buffer.shape[:2] != (target_h, target_w)
+            ):
+                self._rgb_buffer = np.empty((target_h, target_w, 3), dtype=np.uint8)
+            cv2.cvtColor(self._letterbox_canvas, cv2.COLOR_BGR2RGB, dst=self._rgb_buffer)
+            return self._rgb_buffer
+
+        self._letterbox_meta = None
         if self._process_width and w > self._process_width:
             scale = self._process_width / w
             new_w = self._process_width
@@ -196,9 +267,9 @@ class HolisticTracker:
         self._frame_ms += 33
         result = self._landmarker.detect_for_video(mp_image, self._frame_ms)
 
-        pose = _landmarks_to_array(result.pose_landmarks, True)
-        left_hand = _landmarks_to_array(result.left_hand_landmarks)
-        right_hand = _landmarks_to_array(result.right_hand_landmarks)
+        pose = self._remap_landmarks(_landmarks_to_array(result.pose_landmarks, True))
+        left_hand = self._remap_landmarks(_landmarks_to_array(result.left_hand_landmarks))
+        right_hand = self._remap_landmarks(_landmarks_to_array(result.right_hand_landmarks))
         keypoints = extract_keypoints_from_arrays(pose, left_hand, right_hand)
 
         return HolisticOutput(

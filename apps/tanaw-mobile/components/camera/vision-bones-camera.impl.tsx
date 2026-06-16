@@ -46,7 +46,7 @@ async function capturePreviewSnapshot(cameraRef: RefObject<CameraRef | null>): P
 
   try {
     const image = await cameraRef.current.takeSnapshot();
-    const path = await image.saveToTemporaryFileAsync('jpg', 32);
+    const path = await image.saveToTemporaryFileAsync('jpg', 72);
     image.dispose();
     return await readTempImageBase64(path);
   } catch {
@@ -56,7 +56,7 @@ async function capturePreviewSnapshot(cameraRef: RefObject<CameraRef | null>): P
 
 const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
   function VisionBonesCameraInner(
-    { landmarks, isActive = true, onCameraReady, onCameraError },
+    { landmarks, frameAspect, isActive = true, onCameraReady, onCameraError },
     ref,
   ) {
     const cameraRef = useRef<CameraRef>(null);
@@ -103,10 +103,15 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
           if (!isActive || fatalError) return Promise.resolve(null);
           return capturePreviewSnapshot(cameraRef);
         },
+        getBonesFrameMeta: () => ({
+          cameraFacing: facing,
+          captureKind: 'preview-snapshot' as const,
+          frameMirrored: facing === 'front',
+        }),
         isReady: () => isActive && isReady && !fatalError,
         toggleFacing,
       }),
-      [fatalError, isActive, isReady, toggleFacing],
+      [fatalError, facing, isActive, isReady, toggleFacing],
     );
 
     const onLayout = useCallback(
@@ -168,6 +173,7 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
           device={device}
           isActive={isActive}
           resizeMode="cover"
+          mirrorMode={facing === 'front' ? 'on' : 'off'}
           onError={(error) => handleFatalError(error.message)}
           onPreviewStarted={() => {
             if (!isActive) return;
@@ -182,6 +188,7 @@ const VisionBonesCameraInner = forwardRef<BonesCameraRef, BonesCameraProps>(
           landmarks={landmarks ?? null}
           width={viewport.width}
           height={viewport.height}
+          sourceAspect={frameAspect}
         />
       </View>
     );

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from core.engine import InferenceEngine
 from routes.health import router as health_router
 from routes.inference import router as inference_router
-from routes.tts import router as tts_router
+from routes.tts import router as tts_router, warm_demo_tts_cache
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ async def lifespan(_app: FastAPI):
         print("Holistic tracker ready — bones overlay enabled")
     else:
         print(f"Holistic tracker failed: {engine.tracker_error}")
+    warm_demo_tts_cache()
     yield
 
 

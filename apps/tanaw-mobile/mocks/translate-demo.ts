@@ -14,7 +14,13 @@ export const DEMO_SCENARIOS: string[][] = [
 
 /** Demo-specific Tagalog overrides (matches Python DEMO_TAGALOG_OVERRIDES). */
 export const DEMO_TAGALOG_OVERRIDES: Record<string, string> = {
-  NICE_TO_MEET_YOU: 'Ikinagagalak ko kayo makilala',
+  GOOD_AFTERNOON: 'Magandang Hapon',
+  NICE_TO_MEET_YOU: 'Ikinagagalak ko kayong makilala',
+};
+
+/** Full transcript overrides for multi-sign demo scenarios. */
+export const DEMO_TRANSCRIPT_OVERRIDES: Record<string, string> = {
+  'GOOD_AFTERNOON,NICE_TO_MEET_YOU': 'Magandang Hapon. Ikinagagalak ko kayong makilala',
 };
 
 /** Stagger delay between multi-sign reveals (ms). */
@@ -23,8 +29,8 @@ export const DEMO_LABEL_DELAY_MS = 5000;
 /** Tagalog labels from sign_labels.py TAGALOG_BY_KEY */
 export const TAGALOG_BY_KEY: Record<string, string> = {
   HELLO: 'Hello',
-  GOOD_AFTERNOON: 'Magandang hapon',
-  NICE_TO_MEET_YOU: 'Ikinagagalak kitang makilala',
+  GOOD_AFTERNOON: 'Magandang Hapon',
+  NICE_TO_MEET_YOU: 'Ikinagagalak ko kayong makilala',
   YES: 'Oo',
   NO: 'Hindi',
   THANK_YOU: 'Salamat',
@@ -50,8 +56,15 @@ export function demoSignsToTagalog(keys: string[]): string[] {
   return keys.filter(Boolean).map((k) => toTagalog(k));
 }
 
+export function demoSignsKey(signs: string[]): string {
+  return signs.map((key) => key.trim().toUpperCase()).join(',');
+}
+
 /** Fallback transcript when Gemini is unavailable (matches DemoSemanticInterpreter._demo_fallback). */
 export function demoFallbackTranscript(signs: string[]): string {
+  const override = DEMO_TRANSCRIPT_OVERRIDES[demoSignsKey(signs)];
+  if (override) return override;
+
   const words = demoSignsToTagalog(signs);
   if (!words.length) return '';
 

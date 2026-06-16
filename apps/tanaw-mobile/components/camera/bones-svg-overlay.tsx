@@ -8,6 +8,7 @@ import {
   type BonePoint,
   type BonesLandmarks,
 } from '@/types/bones-landmarks';
+import { mapNormalizedPointCover, PORTRAIT_FRAME_ASPECT } from '@/utils/cover-landmarks';
 
 const BONE_GREEN = '#00C83C';
 const JOINT_GREEN = '#50FF64';
@@ -18,9 +19,20 @@ type BonesSvgOverlayProps = {
   width: number;
   height: number;
   mirrorX?: boolean;
+  /** Width / height of the frame the API processed (portrait 9:16). */
+  sourceAspect?: number;
 };
 
-function mapPoint(point: BonePoint, width: number, height: number, mirrorX: boolean) {
+function mapPoint(
+  point: BonePoint,
+  width: number,
+  height: number,
+  mirrorX: boolean,
+  sourceAspect: number,
+) {
+  if (sourceAspect > 0 && width > 0 && height > 0) {
+    return mapNormalizedPointCover(point.x, point.y, sourceAspect, width, height, mirrorX);
+  }
   const x = mirrorX ? (1 - point.x) * width : point.x * width;
   return { x, y: point.y * height };
 }
@@ -36,6 +48,7 @@ function renderConnections(
   width: number,
   height: number,
   mirrorX: boolean,
+  sourceAspect: number,
   requireVisibility: boolean,
   keyPrefix: string,
 ) {
@@ -47,8 +60,8 @@ function renderConnections(
     if (!isVisible(a, requireVisibility) || !isVisible(b, requireVisibility)) {
       return null;
     }
-    const start = mapPoint(a!, width, height, mirrorX);
-    const end = mapPoint(b!, width, height, mirrorX);
+    const start = mapPoint(a!, width, height, mirrorX, sourceAspect);
+    const end = mapPoint(b!, width, height, mirrorX, sourceAspect);
     return (
       <Line
         key={`${keyPrefix}-l-${from}-${to}`}
@@ -65,7 +78,7 @@ function renderConnections(
 
   const joints = points.map((point, index) => {
     if (!isVisible(point, requireVisibility)) return null;
-    const mapped = mapPoint(point, width, height, mirrorX);
+    const mapped = mapPoint(point, width, height, mirrorX, sourceAspect);
     return (
       <Circle
         key={`${keyPrefix}-j-${index}`}
@@ -85,7 +98,13 @@ function renderConnections(
   );
 }
 
-function BonesSvgOverlayImpl({ landmarks, width, height, mirrorX = false }: BonesSvgOverlayProps) {
+function BonesSvgOverlayImpl({
+  landmarks,
+  width,
+  height,
+  mirrorX = false,
+  sourceAspect = PORTRAIT_FRAME_ASPECT,
+}: BonesSvgOverlayProps) {
   const content = useMemo(() => {
     if (!landmarks || width <= 0 || height <= 0) return null;
     return (
@@ -96,6 +115,7 @@ function BonesSvgOverlayImpl({ landmarks, width, height, mirrorX = false }: Bone
           width,
           height,
           mirrorX,
+          sourceAspect,
           true,
           'pose',
         )}
@@ -105,6 +125,7 @@ function BonesSvgOverlayImpl({ landmarks, width, height, mirrorX = false }: Bone
           width,
           height,
           mirrorX,
+          sourceAspect,
           false,
           'lh',
         )}
@@ -114,12 +135,13 @@ function BonesSvgOverlayImpl({ landmarks, width, height, mirrorX = false }: Bone
           width,
           height,
           mirrorX,
+          sourceAspect,
           false,
           'rh',
         )}
       </>
     );
-  }, [landmarks, width, height, mirrorX]);
+  }, [landmarks, width, height, mirrorX, sourceAspect]);
 
   if (!content) return null;
 

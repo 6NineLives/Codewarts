@@ -10,6 +10,15 @@ class SessionCreateResponse(BaseModel):
 class FrameRequest(BaseModel):
     imageBase64: str = Field(..., description="JPEG frame from live video feed")
     drawBones: bool = False
+    cameraFacing: str | None = Field(None, description="'front' or 'back'")
+    captureKind: str | None = Field(
+        None,
+        description="'preview-snapshot' (Vision Camera) or 'still-photo' (Expo takePicture)",
+    )
+    frameMirrored: bool = Field(
+        False,
+        description="True when the JPEG already matches the mirrored selfie preview",
+    )
 
 
 class LandmarkPoint(BaseModel):
@@ -29,6 +38,7 @@ class FrameResponse(BaseModel):
     landmarks: BonesLandmarksPayload | None = None
     bonesReady: bool = False
     hasLandmarks: bool = False
+    frameAspect: float = 9 / 16
     error: str | None = None
 
 

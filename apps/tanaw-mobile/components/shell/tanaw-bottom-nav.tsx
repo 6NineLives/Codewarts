@@ -75,7 +75,14 @@ export function TanawBottomNav({ state, navigation }: TanawTabBarProps) {
               target: route.key,
               canPreventDefault: true,
             });
-            if (!isFocused && !event.defaultPrevented) {
+            if (event.defaultPrevented) return;
+
+            if (route.name === 'discover') {
+              navigation.navigate('discover', { screen: 'index' });
+              return;
+            }
+
+            if (!isFocused) {
               navigation.navigate(route.name, route.params);
             }
           };

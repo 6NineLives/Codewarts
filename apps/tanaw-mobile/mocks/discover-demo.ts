@@ -56,14 +56,26 @@ export const DISCOVER_CONTRIBUTIONS: Contribution[] = [
   ),
 ];
 
-/** Immersive feed — vertical swipe through community clips. */
-export const IMMERSIVE_FEED: Contribution[] = DISCOVER_CONTRIBUTIONS;
-
-export function getContributionById(id: string): Contribution | undefined {
-  return DISCOVER_CONTRIBUTIONS.find((item) => item.id === id);
+export function mergeDiscoverContributions(userContributions: Contribution[]): Contribution[] {
+  return [...userContributions, ...DISCOVER_CONTRIBUTIONS];
 }
 
-export function getImmersiveStartIndex(id: string): number {
-  const index = IMMERSIVE_FEED.findIndex((item) => item.id === id);
+export function getContributionById(
+  id: string,
+  userContributions: Contribution[] = [],
+): Contribution | undefined {
+  return mergeDiscoverContributions(userContributions).find((item) => item.id === id);
+}
+
+export function getImmersiveFeed(userContributions: Contribution[] = []): Contribution[] {
+  return mergeDiscoverContributions(userContributions);
+}
+
+export function getImmersiveStartIndex(id: string, userContributions: Contribution[] = []): number {
+  const feed = getImmersiveFeed(userContributions);
+  const index = feed.findIndex((item) => item.id === id);
   return index >= 0 ? index : 0;
 }
+
+/** @deprecated Use getImmersiveFeed(userContributions) */
+export const IMMERSIVE_FEED: Contribution[] = DISCOVER_CONTRIBUTIONS;

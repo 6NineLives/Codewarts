@@ -27,7 +27,12 @@ DEMO_SCENARIOS: list[list[str]] = [
 ]
 
 DEMO_TAGALOG_OVERRIDES = {
-    "NICE_TO_MEET_YOU": "Ikinagagalak ko kayo makilala",
+    "GOOD_AFTERNOON": "Magandang Hapon",
+    "NICE_TO_MEET_YOU": "Ikinagagalak ko kayong makilala",
+}
+
+DEMO_TRANSCRIPT_OVERRIDES = {
+    "GOOD_AFTERNOON,NICE_TO_MEET_YOU": "Magandang Hapon. Ikinagagalak ko kayong makilala",
 }
 
 DEMO_LABEL_DELAY_MS = 5000
@@ -61,6 +66,9 @@ class DemoSemanticInterpreter(SemanticInterpreter):
 
     @staticmethod
     def _demo_fallback(signs: list[str]) -> str:
+        key = ",".join(k.strip().upper() for k in signs if k)
+        if key in DEMO_TRANSCRIPT_OVERRIDES:
+            return DEMO_TRANSCRIPT_OVERRIDES[key]
         words = demo_signs_to_tagalog(signs)
         if not words:
             return ""

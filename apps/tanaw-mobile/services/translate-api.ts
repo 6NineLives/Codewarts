@@ -6,6 +6,7 @@ export type BonesFrameResult = {
   landmarks: BonesLandmarks | null;
   bonesReady: boolean;
   hasLandmarks: boolean;
+  frameAspect: number;
   error: string | null;
 };
 
@@ -26,13 +27,26 @@ export async function checkHealth(): Promise<HealthStatus> {
   return apiRequest<HealthStatus>('/health');
 }
 
+export type BonesFrameOptions = {
+  cameraFacing?: 'front' | 'back';
+  captureKind?: 'preview-snapshot' | 'still-photo';
+  frameMirrored?: boolean;
+};
+
 export async function sendBonesFrame(
   imageBase64: string,
   signal?: AbortSignal,
+  options?: BonesFrameOptions,
 ): Promise<BonesFrameResult> {
   return apiRequest<BonesFrameResult>('/inference/frame', {
     method: 'POST',
-    body: { imageBase64, drawBones: false },
+    body: {
+      imageBase64,
+      drawBones: false,
+      cameraFacing: options?.cameraFacing,
+      captureKind: options?.captureKind,
+      frameMirrored: options?.frameMirrored ?? false,
+    },
     timeoutMs: 8000,
     signal,
   });

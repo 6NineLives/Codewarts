@@ -48,7 +48,13 @@ async def process_frame(payload: FrameRequest) -> FrameResponse:
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         _frame_pool,
-        lambda: InferenceEngine.get().process_frame(payload.imageBase64, draw_bones=payload.drawBones),
+        lambda: InferenceEngine.get().process_frame(
+            payload.imageBase64,
+            draw_bones=payload.drawBones,
+            camera_facing=payload.cameraFacing,
+            frame_mirrored=payload.frameMirrored,
+            capture_kind=payload.captureKind,
+        ),
     )
     return FrameResponse(**result)
 

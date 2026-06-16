@@ -14,9 +14,27 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fsl_landmarks import HolisticTracker  # noqa: E402
+from fsl_landmarks import HolisticTracker, PORTRAIT_ASPECT, crop_to_aspect_ratio  # noqa: E402
 
-TRACKER_PROCESS_WIDTH = 320
+TRACKER_PROCESS_WIDTH = 360
+TRACKER_PROCESS_HEIGHT = 640
+
+
+def _normalize_mobile_frame(
+    frame: np.ndarray,
+    camera_facing: str | None = None,
+    frame_mirrored: bool = False,
+    capture_kind: str | None = None,
+) -> np.ndarray:
+    """Portrait phone hold: rotate landscape sensor JPEG, crop 9:16, align with preview."""
+    h, w = frame.shape[:2]
+    if w > h:
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    frame = crop_to_aspect_ratio(frame, PORTRAIT_ASPECT)
+    # Expo still photos (skipProcessing) are unmirrored; preview is mirrored for front.
+    if capture_kind == "still-photo" and camera_facing == "front" and not frame_mirrored:
+        frame = cv2.flip(frame, 1)
+    return frame
 
 
 class InferenceEngine:
@@ -38,7 +56,10 @@ class InferenceEngine:
 
     def _init_tracker(self) -> None:
         try:
-            self.tracker = HolisticTracker(process_width=TRACKER_PROCESS_WIDTH)
+            self.tracker = HolisticTracker(
+                process_width=TRACKER_PROCESS_WIDTH,
+                process_height=TRACKER_PROCESS_HEIGHT,
+            )
         except Exception as exc:
             self.tracker_error = str(exc)
             self.tracker = None
@@ -69,16 +90,37 @@ class InferenceEngine:
             for row in arr
         ]
 
-    def process_frame(self, image_base64: str, draw_bones: bool = False) -> dict:
+    def process_frame(
+        self,
+        image_base64: str,
+        draw_bones: bool = False,
+        camera_facing: str | None = None,
+        frame_mirrored: bool = False,
+        capture_kind: str | None = None,
+    ) -> dict:
         with self._process_lock:
-            return self._process_frame_unlocked(image_base64, draw_bones)
+            return self._process_frame_unlocked(
+                image_base64,
+                draw_bones,
+                camera_facing,
+                frame_mirrored,
+                capture_kind,
+            )
 
-    def _process_frame_unlocked(self, image_base64: str, draw_bones: bool = False) -> dict:
+    def _process_frame_unlocked(
+        self,
+        image_base64: str,
+        draw_bones: bool = False,
+        camera_facing: str | None = None,
+        frame_mirrored: bool = False,
+        capture_kind: str | None = None,
+    ) -> dict:
         if not self.tracker:
             return {
                 "overlayImageBase64": None,
                 "bonesReady": False,
                 "hasLandmarks": False,
+                "frameAspect": PORTRAIT_ASPECT,
                 "error": self.tracker_error or "Holistic tracker not loaded",
             }
 
@@ -88,8 +130,13 @@ class InferenceEngine:
                 "overlayImageBase64": None,
                 "bonesReady": True,
                 "hasLandmarks": False,
+                "frameAspect": PORTRAIT_ASPECT,
                 "error": "Invalid frame data",
             }
+
+        frame = _normalize_mobile_frame(frame, camera_facing, frame_mirrored, capture_kind)
+        frame_h, frame_w = frame.shape[:2]
+        frame_aspect = frame_w / frame_h if frame_h > 0 else PORTRAIT_ASPECT
 
         output = self.tracker.process(frame)
         has_landmarks = any(
@@ -118,6 +165,7 @@ class InferenceEngine:
                     "landmarks": landmarks,
                     "bonesReady": True,
                     "hasLandmarks": has_landmarks,
+                    "frameAspect": frame_aspect,
                     "error": "Failed to encode overlay frame",
                 }
             overlay_b64 = base64.b64encode(buf).decode("ascii")
@@ -127,5 +175,6 @@ class InferenceEngine:
             "landmarks": landmarks,
             "bonesReady": True,
             "hasLandmarks": has_landmarks,
+            "frameAspect": frame_aspect,
             "error": None,
         }

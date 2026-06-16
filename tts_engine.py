@@ -20,6 +20,7 @@ class TagalogTTS:
         self._voice = os.getenv("TTS_VOICE", DEFAULT_VOICE).strip() or DEFAULT_VOICE
         self._backend: str | None = None
         self._available = False
+        self._synth_cache: dict[str, bytes] = {}
         self._init_backend()
 
     def _init_backend(self) -> None:
@@ -81,23 +82,30 @@ class TagalogTTS:
 
         spoken_text = self._prepare_text_for_tts(text.strip())
         with self._lock:
+            cached = self._synth_cache.get(spoken_text)
+            if cached is not None:
+                return cached
             try:
+                result: bytes | None = None
                 if self._backend == "edge":
                     path = self._run_async(self._edge_to_file(spoken_text))
                     try:
-                        return Path(path).read_bytes()
+                        result = Path(path).read_bytes()
                     finally:
                         Path(path).unlink(missing_ok=True)
-                if self._backend == "gtts":
+                elif self._backend == "gtts":
                     from gtts import gTTS
 
                     fd, path = tempfile.mkstemp(suffix=".mp3")
                     os.close(fd)
                     try:
                         gTTS(text=spoken_text, lang="tl").save(path)
-                        return Path(path).read_bytes()
+                        result = Path(path).read_bytes()
                     finally:
                         Path(path).unlink(missing_ok=True)
+                if result:
+                    self._synth_cache[spoken_text] = result
+                return result
             except Exception as exc:
                 print(f"TTS synthesize error ({self._backend}): {exc}")
         return None

@@ -4,7 +4,6 @@
  */
 
 import { useFocusEffect } from '@react-navigation/native';
-import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
@@ -12,12 +11,17 @@ import type { BonesCameraRef } from '@/components/camera/bones-camera-types';
 import {
   DEMO_LABEL_DELAY_MS,
   DEMO_SCENARIOS,
+  DEMO_TRANSCRIPT_OVERRIDES,
   demoFallbackTranscript,
+  demoSignsKey,
+  getDemoScenarios,
   nextDemoScenarioIndex,
 } from '@/mocks/translate-demo';
-import { fetchTtsAudio, sendBonesFrame, translateSigns } from '@/services/translate-api';
+import { sendBonesFrame, translateSigns } from '@/services/translate-api';
 import type { BonesLandmarks } from '@/types/bones-landmarks';
 import { landmarksEqual } from '@/utils/landmarks-equal';
+import { PORTRAIT_FRAME_ASPECT } from '@/utils/cover-landmarks';
+import { prefetchTtsAudio, speakTts, stopTtsPlayback, warmDemoTtsCache } from '@/utils/tts-player';
 
 /**
  * Adaptive capture pacing — high FPS when the pipeline keeps up,
@@ -33,6 +37,7 @@ export type TranslateDemoState = {
   transcript: string;
   landmarks: BonesLandmarks | null;
   hasLandmarks: boolean;
+  frameAspect: number;
   toggleTranslating: () => void;
   onCameraReady: () => void;
   onCameraError: () => void;
@@ -40,11 +45,13 @@ export type TranslateDemoState = {
 
 export function useTranslateDemo(
   cameraRef: RefObject<BonesCameraRef | null>,
+  trackBones: boolean,
 ): TranslateDemoState {
   const [isTranslating, setIsTranslating] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [landmarks, setLandmarks] = useState<BonesLandmarks | null>(null);
   const [hasLandmarks, setHasLandmarks] = useState(false);
+  const [frameAspect, setFrameAspect] = useState(PORTRAIT_FRAME_ASPECT);
 
   const demoIndexRef = useRef(0);
   const isTranslatingRef = useRef(false);
@@ -84,21 +91,7 @@ export function useTranslateDemo(
   const speakTranscript = useCallback(async (text: string) => {
     if (!text || text === lastSpokenRef.current) return;
     lastSpokenRef.current = text;
-
-    try {
-      const audio = await fetchTtsAudio(text);
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: `data:audio/mpeg;base64,${audio.audioBase64}` },
-        { shouldPlay: true },
-      );
-      soundRef.current = sound;
-    } catch {
-      Speech.speak(text, { language: 'fil-PH' });
-    }
+    await speakTts(text, soundRef);
   }, []);
 
   const scheduleTimer = useCallback((delayMs: number, fn: () => void) => {
@@ -118,15 +111,17 @@ export function useTranslateDemo(
       }
 
       const signsCopy = [...detectedSignsRef.current];
-      const interim = demoFallbackTranscript(signsCopy);
-      setTranscript(interim);
-      void speakTranscript(interim);
+      const transcriptText = demoFallbackTranscript(signsCopy);
+      setTranscript(transcriptText);
+      void speakTranscript(transcriptText);
 
-      void translateSigns(signsCopy).then((geminiText) => {
-        if (geminiText && isTranslatingRef.current) {
-          setTranscript(geminiText);
-        }
-      });
+      if (!DEMO_TRANSCRIPT_OVERRIDES[demoSignsKey(signsCopy)]) {
+        void translateSigns(signsCopy).then((geminiText) => {
+          if (geminiText && isTranslatingRef.current) {
+            setTranscript(geminiText);
+          }
+        });
+      }
     },
     [scheduleTimer, speakTranscript],
   );
@@ -137,6 +132,7 @@ export function useTranslateDemo(
       detectedSignsRef.current = [];
       setTranscript('Nakikinig…');
       lastSpokenRef.current = '';
+      prefetchTtsAudio(demoFallbackTranscript(signs));
       scheduleTimer(DEMO_LABEL_DELAY_MS, () => revealSign(signs, 0));
     },
     [clearTimers, revealSign, scheduleTimer],
@@ -156,7 +152,8 @@ export function useTranslateDemo(
     setIsTranslating(false);
     setTranscript('');
     lastSpokenRef.current = '';
-    void soundRef.current?.stopAsync();
+    void stopTtsPlayback(soundRef.current);
+    soundRef.current = null;
   }, [clearTimers]);
 
   const toggleTranslating = useCallback(() => {
@@ -182,24 +179,34 @@ export function useTranslateDemo(
     const base64 = pendingFrameRef.current;
     pendingFrameRef.current = null;
     const generation = ++inferenceGenerationRef.current;
+    const frameMeta = cameraRef.current?.getBonesFrameMeta();
 
     inferenceAbortRef.current?.abort();
     const controller = new AbortController();
     inferenceAbortRef.current = controller;
     inferenceInFlightRef.current = true;
 
-    void sendBonesFrame(base64, controller.signal)
+    void sendBonesFrame(base64, controller.signal, frameMeta)
       .then((result) => {
         if (generation !== inferenceGenerationRef.current) return;
-        if (result.landmarks) {
+        if (result.frameAspect > 0) {
+          setFrameAspect((prev) =>
+            prev === result.frameAspect ? prev : result.frameAspect,
+          );
+        }
+        if (result.hasLandmarks && result.landmarks) {
           if (!landmarksEqual(latestLandmarksRef.current, result.landmarks)) {
             latestLandmarksRef.current = result.landmarks;
             setLandmarks(result.landmarks);
           }
-          setHasLandmarks((prev) =>
-            prev === result.hasLandmarks ? prev : result.hasLandmarks,
-          );
-        } else if (__DEV__ && result.error) {
+        } else {
+          latestLandmarksRef.current = null;
+          setLandmarks(null);
+        }
+        setHasLandmarks((prev) =>
+          prev === result.hasLandmarks ? prev : result.hasLandmarks,
+        );
+        if (__DEV__ && result.error) {
           console.warn('[bones]', result.error);
         }
       })
@@ -274,21 +281,37 @@ export function useTranslateDemo(
   };
 
   const startBonesLoop = useCallback(() => {
-    if (!cameraReadyRef.current) return;
+    if (!trackBones || !cameraReadyRef.current) return;
     stopBonesLoop();
     bonesPumpActiveRef.current = true;
     tickBonesLoop();
-  }, [stopBonesLoop, tickBonesLoop]);
+  }, [stopBonesLoop, tickBonesLoop, trackBones]);
 
   const onCameraReady = useCallback(() => {
     cameraReadyRef.current = true;
-    startBonesLoop();
-  }, [startBonesLoop]);
+    if (trackBones) {
+      startBonesLoop();
+    }
+  }, [startBonesLoop, trackBones]);
 
   const onCameraError = useCallback(() => {
     consecutiveCaptureFailRef.current += 3;
     stopBonesLoop();
   }, [stopBonesLoop]);
+
+  useEffect(() => {
+    if (trackBones && cameraReadyRef.current) {
+      startBonesLoop();
+      return;
+    }
+    stopBonesLoop();
+    if (!trackBones) {
+      latestLandmarksRef.current = null;
+      setLandmarks(null);
+      setHasLandmarks(false);
+      setFrameAspect(PORTRAIT_FRAME_ASPECT);
+    }
+  }, [startBonesLoop, stopBonesLoop, trackBones]);
 
   useFocusEffect(
     useCallback(() => {
@@ -299,13 +322,15 @@ export function useTranslateDemo(
   );
 
   useEffect(() => {
+    warmDemoTtsCache(getDemoScenarios().map((scenario) => scenario.transcript));
     void Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
 
     return () => {
       stopBonesLoop();
       clearTimers();
       isTranslatingRef.current = false;
-      void soundRef.current?.unloadAsync();
+      void stopTtsPlayback(soundRef.current);
+      soundRef.current = null;
     };
   }, [clearTimers, stopBonesLoop]);
 
@@ -314,6 +339,7 @@ export function useTranslateDemo(
     transcript,
     landmarks,
     hasLandmarks,
+    frameAspect,
     toggleTranslating,
     onCameraReady,
     onCameraError,
